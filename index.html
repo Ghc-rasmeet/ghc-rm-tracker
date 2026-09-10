@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Client Touch Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<style>
+:root{
+  --green:#1d5c3a; --green-dark:#143f28; --green-soft:#e7f1ea;
+  --ink:#1b1f1c; --muted:#6b736e; --line:#d9ded9; --bg:#f7f8f6; --paper:#ffffff;
+  --hot:#b4530b; --hot-soft:#fbeee2; --cold:#8a8f8b; --done:#1d5c3a; --warn:#a12b2b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--green)}
+.hidden{display:none!important}
+
+/* login */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:28px;width:100%;max-width:380px}
+.card h1{font-size:22px;font-weight:600;margin:0 0 4px}
+.card p{margin:0 0 20px;color:var(--muted)}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:#fff}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--green);outline-offset:1px;border-color:var(--green)}
+.btn{display:inline-block;padding:9px 16px;border-radius:6px;border:1px solid var(--green);background:var(--green);color:#fff;font-weight:500}
+.btn:hover{background:var(--green-dark)}
+.btn.ghost{background:#fff;color:var(--green)}
+.btn.ghost:hover{background:var(--green-soft)}
+.btn.small{padding:6px 10px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+.err{color:var(--warn);font-size:13px;margin-top:10px;min-height:18px}
+
+/* shell */
+header{background:var(--paper);border-bottom:1px solid var(--line);padding:0 20px}
+.bar{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:16px;height:56px}
+.brand{font-weight:600;font-size:16px}
+.brand span{color:var(--green)}
+.spacer{flex:1}
+.who{color:var(--muted);font-size:13px}
+main{max-width:1200px;margin:0 auto;padding:20px}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px}
+.stat{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer}
+.stat.active{border-color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
+.stat b{display:block;font-size:26px;font-weight:600;line-height:1.1}
+.stat span{font-size:13px;color:var(--muted)}
+.stat.hot b{color:var(--hot)}
+.stat.untouched b{color:var(--warn)}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.controls input,.controls select{width:auto;min-width:160px}
+.controls .grow{flex:1;min-width:180px}
+.toggle{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap}
+.toggle input{width:auto}
+
+/* table */
+.tablewrap{background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:500;color:var(--muted);font-size:13px;background:#fafbfa;position:sticky;top:0}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--green-soft)}
+tr.fam td{background:#f0f2ef;font-weight:500;color:var(--muted);font-size:13px}
+td.note{color:var(--muted);max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.pill.hot{background:var(--hot-soft);color:var(--hot)}
+.pill.done{background:var(--green-soft);color:var(--done)}
+.pill.cold{background:#eef0ee;color:var(--cold)}
+.pill.none{background:#fbecec;color:var(--warn)}
+.pill.talk{background:#eef0ee;color:var(--ink)}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+
+/* drawer */
+#drawer{position:fixed;top:0;right:0;bottom:0;width:100%;max-width:520px;background:var(--paper);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.08);transform:translateX(100%);transition:transform .2s;overflow:auto;z-index:20}
+#drawer.open{transform:none}
+@media (prefers-reduced-motion:reduce){#drawer{transition:none}}
+.dhead{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start}
+.dhead h2{margin:0;font-size:20px;font-weight:600}
+.dhead .meta{color:var(--muted);font-size:13px;margin-top:2px}
+.x{margin-left:auto;background:none;border:none;font-size:22px;line-height:1;color:var(--muted)}
+.dbody{padding:18px 20px}
+.dbody h3{font-size:14px;font-weight:600;margin:0 0 8px;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.hist{list-style:none;margin:0;padding:0}
+.hist li{padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.hist .d{color:var(--muted);font-size:13px;margin-bottom:2px}
+.hist .n{white-space:pre-wrap}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:10}
+
+/* manager tools */
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:6px;font-size:14px;z-index:30}
+@media (max-width:700px){
+  .bar{gap:10px} .who{display:none}
+  th:nth-child(4),td:nth-child(4){display:none}
+  td.note{max-width:160px}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="card">
+    <h1>Client Touch Tracker</h1>
+    <p>Green Hedge Capital</p>
+    <label>Email</label>
+    <input id="email" type="email" autocomplete="username">
+    <label>Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" id="loginBtn" style="width:100%">Sign in</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header><div class="bar">
+    <div class="brand"><span>GHC</span> Touch Tracker</div>
+    <div class="spacer"></div>
+    <div class="who" id="who"></div>
+    <button class="btn ghost small" id="logout">Sign out</button>
+  </div></header>
+
+  <main>
+    <div class="stats" id="stats"></div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search name, PAN, family, note">
+      <select id="rmSel" class="hidden"></select>
+      <select id="qtr"></select>
+      <label class="toggle"><input type="checkbox" id="famGroup"> Group by family</label>
+      <button class="btn ghost small" id="logAny">Log a touch</button>
+      <span class="tools hidden" id="mgrTools">
+        <button class="btn ghost small" id="uploadBtn">Upload clients</button>
+        <input type="file" id="uploadFile" accept=".xlsx,.xls,.csv" class="hidden">
+        <button class="btn ghost small" id="exportBtn">Export all</button>
+      </span>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th>Client</th><th>Latest status</th><th>Last touch</th><th>Family head</th><th>Last note</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty hidden" id="empty"></div>
+    </div>
+  </main>
+</div>
+
+<!-- CLIENT DRAWER -->
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead">
+    <div>
+      <h2 id="dName"></h2>
+      <div class="meta" id="dMeta"></div>
+    </div>
+    <button class="x" id="dClose" aria-label="Close">×</button>
+  </div>
+  <div class="dbody">
+    <h3>Log a touch</h3>
+    <div id="pickWrap" class="hidden">
+      <label>Client</label>
+      <input id="pickClient" list="clientList" placeholder="Start typing a name">
+      <datalist id="clientList"></datalist>
+    </div>
+    <div class="grid2">
+      <div><label>Date</label><input type="date" id="fDate"></div>
+      <div><label>Type</label><select id="fType">
+        <option value="sales">Sales</option><option value="relationship">Relationship call</option><option value="review">Review</option>
+      </select></div>
+      <div><label>Mode</label><select id="fMode">
+        <option>call</option><option>meeting</option><option>message</option><option>call & message</option>
+      </select></div>
+      <div><label>Status</label><select id="fStatus">
+        <option>discussed</option><option>discussed & interested</option><option>discussed & not interested</option><option>executed</option>
+      </select></div>
+    </div>
+    <label>Note</label>
+    <textarea id="fNote" rows="3" placeholder="e.g. Will park 10 lakh next month"></textarea>
+    <div class="err" id="fErr"></div>
+    <button class="btn" id="fSave">Save touch</button>
+
+    <h3 style="margin-top:26px">History</h3>
+    <ul class="hist" id="hist"></ul>
+  </div>
+</aside>
+
+<div id="toast" class="hidden"></div>
+
+<script>
+/* ===== CONFIG ===== */
+const SUPABASE_URL = "https://smxmxrajahsajuwavzlb.supabase.co";
+const SUPABASE_KEY = "sb_publishable_xQ6tkpeP0VVnp53eKVzqBw_UURnzkuW";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ===== STATE ===== */
+let me = null, profile = null, profiles = [], clients = [], touches = [];
+let filter = { stat: "all", rm: "all", q: "", qtr: null };
+let openClientId = null;
+
+/* ===== HELPERS ===== */
+const $ = id => document.getElementById(id);
+const esc = s => (s ?? "").toString().replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = d => d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", {day:"2-digit", month:"short"}) : "—";
+const today = () => new Date().toISOString().slice(0,10);
+function toast(msg, ms = 2500){ $("toast").textContent = msg; $("toast").classList.remove("hidden"); setTimeout(()=>$("toast").classList.add("hidden"), ms); }
+
+// Indian financial-year quarters
+function quarterOf(date){
+  const y = date.getFullYear(), m = date.getMonth();
+  const qi = m >= 3 ? Math.floor((m - 3) / 3) : 3;          // 0..3 (Apr-Jun=0 ... Jan-Mar=3)
+  const fyStart = m >= 3 ? y : y - 1;
+  const startMonth = [3, 6, 9, 0][qi];
+  const startYear = qi === 3 ? fyStart + 1 : fyStart;
+  const start = new Date(startYear, startMonth, 1);
+  const end = new Date(startYear, startMonth + 3, 0);
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return { key: iso(start), start: iso(start), end: iso(end),
+    label: `Q${qi+1} FY${String(fyStart).slice(2)}-${String(fyStart+1).slice(2)} (${start.toLocaleString("en-IN",{month:"short"})}–${end.toLocaleString("en-IN",{month:"short"})} ${end.getFullYear()})` };
+}
+function quarterList(n = 6){
+  const out = []; let d = new Date();
+  for (let i = 0; i < n; i++){ const q = quarterOf(d); out.push(q); d = new Date(q.start + "T00:00:00"); d.setDate(d.getDate() - 1); }
+  return out;
+}
+
+async function fetchAll(table, select, order){
+  let out = [], from = 0, size = 1000;
+  while (true){
+    let q = sb.from(table).select(select).range(from, from + size - 1);
+    if (order) q = q.order(order.col, { ascending: order.asc ?? true });
+    const { data, error } = await q;
+    if (error) throw error;
+    out = out.concat(data);
+    if (data.length < size) break;
+    from += size;
+  }
+  return out;
+}
+
+/* ===== AUTH ===== */
+$("loginBtn").onclick = async () => {
+  $("loginErr").textContent = ""; $("loginBtn").disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+  $("loginBtn").disabled = false;
+  if (error) $("loginErr").textContent = "Wrong email or password.";
+};
+$("password").addEventListener("keydown", e => { if (e.key === "Enter") $("loginBtn").click(); });
+$("logout").onclick = () => sb.auth.signOut();
+
+sb.auth.onAuthStateChange(async (_e, session) => {
+  if (session?.user){ me = session.user; await boot(); }
+  else { me = null; $("app").classList.add("hidden"); $("login").classList.remove("hidden"); }
+});
+
+/* ===== LOAD ===== */
+async function boot(){
+  try {
+    profiles = await fetchAll("profiles", "id, full_name, role, email");
+    profile = profiles.find(p => p.id === me.id) || { full_name: me.email, role: "rm" };
+    clients = await fetchAll("clients", "id, client_code, name, pan, family_head, rm_id", { col: "name" });
+    touches = await fetchAll("touches", "id, client_id, rm_id, touch_date, mode, status, touch_type, note, created_at", { col: "created_at", asc: false });
+  } catch (e){ alert("Could not load data: " + e.message); return; }
+
+  $("who").textContent = `${profile.full_name} · ${profile.role === "manager" ? "Manager" : "RM"}`;
+  const isMgr = profile.role === "manager";
+  $("mgrTools").classList.toggle("hidden", !isMgr);
+  $("rmSel").classList.toggle("hidden", !isMgr);
+  if (isMgr){
+    $("rmSel").innerHTML = `<option value="all">All RMs</option>` +
+      profiles.filter(p => p.role === "rm").map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
+  }
+  const qs = quarterList();
+  $("qtr").innerHTML = qs.map(q => `<option value="${q.key}">${esc(q.label)}</option>`).join("");
+  filter.qtr = qs[0];
+  $("login").classList.add("hidden"); $("app").classList.remove("hidden");
+  render();
+}
+
+/* ===== DERIVED ===== */
+function enrich(){
+  const byClient = {};
+  for (const t of touches){ (byClient[t.client_id] ||= []).push(t); }
+  const { start, end } = filter.qtr;
+  return clients.map(c => {
+    const list = (byClient[c.id] || []).slice().sort((a,b) => (b.touch_date+b.created_at).localeCompare(a.touch_date+a.created_at));
+    const last = list[0] || null;
+    const inQ = list.filter(t => t.touch_date >= start && t.touch_date <= end);
+    const rm = profiles.find(p => p.id === c.rm_id);
+    return { ...c, list, last, inQ, touched: inQ.length > 0,
+      hot: last && last.status === "discussed & interested",
+      executed: inQ.some(t => t.status === "executed"),
+      rmName: rm ? rm.full_name : "—" };
+  });
+}
+
+function pillClass(status){
+  if (!status) return "none";
+  if (status === "discussed & interested") return "hot";
+  if (status === "executed") return "done";
+  if (status === "discussed & not interested") return "cold";
+  return "talk";
+}
+
+/* ===== RENDER ===== */
+function render(){
+  let all = enrich();
+  if (profile.role === "manager" && filter.rm !== "all") all = all.filter(c => c.rm_id === filter.rm);
+
+  const counts = {
+    all: all.length, touched: all.filter(c => c.touched).length,
+    untouched: all.filter(c => !c.touched).length,
+    hot: all.filter(c => c.hot).length, executed: all.filter(c => c.executed).length,
+  };
+  $("stats").innerHTML = [
+    ["all","Clients"],["touched","Touched this quarter"],["untouched","Not yet touched"],["hot","Hot (interested)"],["executed","Executed this quarter"]
+  ].map(([k,l]) => `<div class="stat ${k} ${filter.stat===k?"active":""}" data-k="${k}"><b>${counts[k]}</b><span>${l}</span></div>`).join("");
+  document.querySelectorAll(".stat").forEach(el => el.onclick = () => { filter.stat = el.dataset.k; render(); });
+
+  let rows = all;
+  if (filter.stat !== "all") rows = rows.filter(c => c[filter.stat]);
+  const q = filter.q.toLowerCase();
+  if (q) rows = rows.filter(c =>
+    [c.name, c.pan, c.family_head, c.client_code, c.last?.note].some(v => (v||"").toLowerCase().includes(q)));
+
+  const row = c => `<tr class="row" data-id="${c.id}">
+    <td><div>${esc(c.name)}</div><div style="font-size:12px;color:var(--muted)">${esc(c.pan||"")}${profile.role==="manager"?" · "+esc(c.rmName):""}</div></td>
+    <td><span class="pill ${pillClass(c.last?.status)}">${esc(c.last?.status || "not touched")}</span></td>
+    <td>${c.last ? fmt(c.last.touch_date) : "—"}</td>
+    <td>${esc(c.family_head||"")}</td>
+    <td class="note" title="${esc(c.last?.note||"")}">${esc(c.last?.note||"")}</td></tr>`;
+
+  let html = "";
+  if ($("famGroup").checked){
+    const groups = {};
+    rows.forEach(c => (groups[c.family_head || "No family head"] ||= []).push(c));
+    Object.keys(groups).sort().forEach(f => {
+      html += `<tr class="fam"><td colspan="5">${esc(f)} · ${groups[f].length}</td></tr>` + groups[f].map(row).join("");
+    });
+  } else html = rows.map(row).join("");
+
+  $("rows").innerHTML = html;
+  $("empty").classList.toggle("hidden", rows.length > 0);
+  $("empty").textContent = clients.length ? "No clients match this filter." : "No clients yet. Upload the client list to begin.";
+  document.querySelectorAll("tr.row").forEach(el => el.onclick = () => openDrawer(el.dataset.id));
+}
+
+$("q").oninput = e => { filter.q = e.target.value; render(); };
+$("rmSel").onchange = e => { filter.rm = e.target.value; render(); };
+$("qtr").onchange = e => { filter.qtr = quarterList().find(q => q.key === e.target.value); render(); };
+$("famGroup").onchange = render;
+
+/* ===== DRAWER ===== */
+function openDrawer(id){
+  openClientId = id;
+  const c = enrich().find(x => x.id === id);
+  $("pickWrap").classList.toggle("hidden", !!c);
+  if (c){
+    $("dName").textContent = c.name;
+    $("dMeta").textContent = [c.pan, c.family_head && ("Family: " + c.family_head), profile.role === "manager" && ("RM: " + c.rmName)].filter(Boolean).join(" · ");
+    $("hist").innerHTML = c.list.length ? c.list.map(t => `<li>
+      <div class="d">${fmt(t.touch_date)} · ${esc(t.mode)} · ${esc(t.touch_type)} · <span class="pill ${pillClass(t.status)}">${esc(t.status)}</span></div>
+      <div class="n">${esc(t.note||"")}</div></li>`).join("") : `<li style="color:var(--muted)">No touches yet.</li>`;
+  } else {
+    $("dName").textContent = "Log a touch"; $("dMeta").textContent = ""; $("hist").innerHTML = "";
+    $("pickClient").value = "";
+    const mine = profile.role === "manager" ? clients : clients.filter(x => x.rm_id === me.id);
+    $("clientList").innerHTML = mine.map(x => `<option value="${esc(x.name)}${x.pan ? " ("+esc(x.pan)+")" : ""}">`).join("");
+  }
+  $("fDate").value = today(); $("fNote").value = ""; $("fErr").textContent = "";
+  $("drawer").classList.add("open"); $("overlay").classList.remove("hidden");
+}
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); openClientId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+$("logAny").onclick = () => openDrawer(null);
+
+$("fSave").onclick = async () => {
+  $("fErr").textContent = "";
+  let client = clients.find(c => c.id === openClientId);
+  if (!client){
+    const v = $("pickClient").value.trim();
+    client = clients.find(x => `${x.name}${x.pan ? " ("+x.pan+")" : ""}` === v) || clients.find(x => x.name.toLowerCase() === v.toLowerCase());
+    if (!client){ $("fErr").textContent = "Pick a client from the list."; return; }
+  }
+  const rec = {
+    client_id: client.id,
+    rm_id: profile.role === "manager" ? (client.rm_id || me.id) : me.id,
+    touch_date: $("fDate").value || today(),
+    mode: $("fMode").value, status: $("fStatus").value, touch_type: $("fType").value,
+    note: $("fNote").value.trim() || null,
+  };
+  $("fSave").disabled = true;
+  const { data, error } = await sb.from("touches").insert(rec).select().single();
+  $("fSave").disabled = false;
+  if (error){ $("fErr").textContent = "Could not save: " + error.message; return; }
+  touches.unshift(data);
+  toast("Touch saved");
+  render();
+  openDrawer(client.id);
+};
+
+/* ===== MANAGER: UPLOAD ===== */
+$("uploadBtn").onclick = () => $("uploadFile").click();
+$("uploadFile").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return; e.target.value = "";
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+  const norm = s => s.toString().toLowerCase().replace(/[^a-z]/g, "");
+  const pick = (r, ...keys) => { for (const k of Object.keys(r)) if (keys.includes(norm(k))) return (r[k] ?? "").toString().trim(); return ""; };
+  const byEmail = Object.fromEntries(profiles.filter(p => p.email).map(p => [p.email.toLowerCase(), p.id]));
+  const byName  = Object.fromEntries(profiles.map(p => [p.full_name.toLowerCase(), p.id]));
+  const recs = [], skipped = [];
+  for (const r of rows){
+    const name = pick(r, "name", "clientname", "client");
+    if (!name) continue;
+    const rmKey = pick(r, "rmemail", "rm", "rmname", "relationshipmanager").toLowerCase();
+    const rm_id = byEmail[rmKey] || byName[rmKey] || null;
+    if (rmKey && !rm_id) skipped.push(`${name} (RM "${rmKey}" not found)`);
+    recs.push({ name, pan: pick(r, "pan", "panno", "pannumber") || null,
+      family_head: pick(r, "familyhead", "family", "head") || null,
+      client_code: pick(r, "clientcode", "code", "clientid", "custid", "customerid") || null, rm_id });
+  }
+  if (!recs.length){ toast("No rows found. Need a 'Name' column."); return; }
+  if (!confirm(`Upload ${recs.length} clients? Existing client codes will be updated.${skipped.length ? "\n\n" + skipped.length + " rows have an unknown RM and will be left unassigned." : ""}`)) return;
+  const withCode = recs.filter(r => r.client_code), noCode = recs.filter(r => !r.client_code);
+  try {
+    for (let i = 0; i < withCode.length; i += 500){
+      const { error } = await sb.from("clients").upsert(withCode.slice(i, i+500), { onConflict: "client_code" }); if (error) throw error;
+    }
+    for (let i = 0; i < noCode.length; i += 500){
+      const { error } = await sb.from("clients").insert(noCode.slice(i, i+500)); if (error) throw error;
+    }
+    clients = await fetchAll("clients", "id, client_code, name, pan, family_head, rm_id", { col: "name" });
+    toast(`Uploaded ${recs.length} clients`); render();
+  } catch (err){ alert("Upload failed: " + err.message); }
+};
+
+/* ===== MANAGER: EXPORT ===== */
+$("exportBtn").onclick = () => {
+  const cmap = Object.fromEntries(clients.map(c => [c.id, c]));
+  const pmap = Object.fromEntries(profiles.map(p => [p.id, p.full_name]));
+  const tRows = touches.map(t => { const c = cmap[t.client_id] || {}; return {
+    Date: t.touch_date, RM: pmap[t.rm_id] || "", Client: c.name || "", PAN: c.pan || "", "Family head": c.family_head || "",
+    "Client code": c.client_code || "", Type: t.touch_type, Mode: t.mode, Status: t.status, Note: t.note || "", "Logged at": t.created_at }; });
+  const cRows = enrich().map(c => ({ Client: c.name, PAN: c.pan || "", "Family head": c.family_head || "", "Client code": c.client_code || "",
+    RM: c.rmName, "Last touch": c.last?.touch_date || "", "Latest status": c.last?.status || "not touched", "Last note": c.last?.note || "" }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tRows), "Touches");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cRows), "Clients");
+  XLSX.writeFile(wb, `GHC_touches_backup_${today()}.xlsx`);
+};
+</script>
+</body>
+</html>
