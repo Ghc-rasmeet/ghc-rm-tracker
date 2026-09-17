@@ -1,0 +1,1140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Client Touch Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<style>
+:root{
+  --green:#1d5c3a; --green-dark:#143f28; --green-soft:#e7f1ea;
+  --ink:#1b1f1c; --muted:#6b736e; --line:#d9ded9; --bg:#f7f8f6; --paper:#ffffff;
+  --hot:#b4530b; --hot-soft:#fbeee2; --cold:#8a8f8b; --done:#1d5c3a; --warn:#a12b2b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--green)}
+.hidden{display:none!important}
+
+/* login */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:28px;width:100%;max-width:380px}
+.card h1{font-size:22px;font-weight:600;margin:0 0 4px}
+.card p{margin:0 0 20px;color:var(--muted)}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:#fff}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--green);outline-offset:1px;border-color:var(--green)}
+.btn{display:inline-block;padding:9px 16px;border-radius:6px;border:1px solid var(--green);background:var(--green);color:#fff;font-weight:500}
+.btn:hover{background:var(--green-dark)}
+.btn.ghost{background:#fff;color:var(--green)}
+.btn.blue{background:#2f6fb5;border-color:#2f6fb5}
+.btn.blue:hover{background:#245a95}
+.btn.ghost:hover{background:var(--green-soft)}
+.btn.small{padding:6px 10px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+.err{color:var(--warn);font-size:13px;margin-top:10px;min-height:18px}
+
+/* shell */
+header{background:var(--paper);border-bottom:1px solid var(--line);padding:0 20px}
+.bar{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:16px;height:56px}
+.brand{font-weight:600;font-size:16px}
+.brand span{color:var(--green)}
+.spacer{flex:1}
+.who{color:var(--muted);font-size:13px}
+main{max-width:1200px;margin:0 auto;padding:20px}
+
+/* stats */
+.band{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:flex-start;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:14px}
+.grp{display:flex;flex-direction:column;gap:4px}
+.grp .rvhead{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.fml{font-size:11px;color:#a3a9a5;margin-top:2px}
+.stats{display:flex;flex-wrap:wrap;gap:6px;margin:0}
+.stat{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;min-width:92px}
+.stat.active{border-color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
+.stat b{display:block;font-size:18px;font-weight:600;line-height:1.1}
+.stat span{font-size:11px;color:var(--muted);white-space:nowrap}
+.stat.hot b{color:var(--hot)}
+.stat.untouched b{color:var(--warn)}
+.stat.adminTouched b{color:#5b3fa0}
+.rvhead{font-size:13px;color:var(--muted);margin:-8px 0 8px;font-weight:500}
+.stat.rvSent b,.stat.rvDisc b{color:var(--warn)} .stat.rvNo b{color:var(--cold)} .stat.rvExec b{color:var(--done)}
+.dot{display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid #b8bdb9;vertical-align:middle}
+.dot.sent,.dot.no-answer{background:#c8322b;border-color:#c8322b} .dot.discussing{background:#d99a1e;border-color:#d99a1e}
+.dot.declined,.dot.interested,.dot.executed{background:var(--green);border-color:var(--green)} .dot.avoiding{background:#c026a8;border-color:#c026a8}
+td.st{min-width:150px} td.st .lbl{font-size:12px;margin-left:6px;vertical-align:middle} td.st .n{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.3} td.st .n b{color:var(--ink);font-weight:500;margin-right:4px}
+.pill.red{background:#fbecec;color:#c8322b} .pill.mag{background:#f8e6f4;color:#c026a8}
+.stat.pct b{color:var(--green)} .stat.red b{color:#c8322b} .stat.amb b{color:#d99a1e} .stat.grn b{color:var(--green)} .stat.mag b{color:#c026a8}
+td.rv{white-space:nowrap;min-width:110px}
+th.side,td.side{background:#eef3f8!important;border-left:1px solid #d5dfe9}
+td.rmcol.side{min-width:140px;max-width:150px;white-space:normal;word-break:break-all;font-size:12px;line-height:1.3}
+tr.row.flash td{background:#cfe8d6!important;transition:background 1.2s}
+tr.row:hover td.side{background:#e3ecf5!important} td.rv small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.rvbox{margin-top:26px;padding-top:18px;border-top:1px solid var(--line)}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.controls input,.controls select{width:auto;min-width:160px}
+.controls .grow{flex:1;min-width:180px}
+.toggle{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap}
+.toggle input{width:auto}
+
+/* table */
+.tablewrap{background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;table-layout:auto}
+td{white-space:normal;word-break:break-word;vertical-align:top}
+th,td{padding:7px 8px}
+td.note{max-width:300px;min-width:180px}
+td.side:last-child,th.side:last-child{min-width:130px;max-width:170px}
+td:first-child{min-width:150px;max-width:220px}
+.pill{white-space:normal}
+th,td{text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:500;color:var(--muted);font-size:13px;background:#fafbfa;position:sticky;top:0}
+th.sort{cursor:pointer;user-select:none;white-space:nowrap}
+th.sort:hover{color:var(--ink)}
+th.sort.on{color:var(--green);font-weight:600}
+tr.filters th{padding:4px 8px;top:35px}
+tr.filters input,tr.filters select{padding:4px 6px;font-size:12px;border-radius:4px}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--green-soft)}
+tr.fam td{background:#f0f2ef;font-weight:500;color:var(--muted);font-size:13px}
+td.note{color:var(--muted);font-size:13px;line-height:1.35}
+td.note div{margin-bottom:2px}
+td.note b{color:var(--ink);font-weight:500;margin-right:6px}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.pill.hot{background:var(--hot-soft);color:var(--hot)}
+.pill.done{background:var(--green-soft);color:var(--done)}
+.pill.cold{background:#eef0ee;color:var(--cold)}
+.pill.none{background:#fbecec;color:var(--warn)}
+.pill.talk{background:#eef0ee;color:var(--ink)}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+.pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;font-size:13px;color:var(--muted);margin:8px 0}
+.pager select{width:auto;padding:4px 6px;font-size:13px}
+body.is-rm .rmcol{display:none}
+
+/* drawer */
+#drawer{position:fixed;top:0;right:0;bottom:0;width:100%;max-width:520px;background:var(--paper);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.08);transform:translateX(100%);transition:transform .2s;overflow:auto;z-index:20}
+#drawer.open{transform:none}
+@media (prefers-reduced-motion:reduce){#drawer{transition:none}}
+.dhead{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start}
+.dhead h2{margin:0;font-size:20px;font-weight:600}
+.dhead .meta{color:var(--muted);font-size:13px;margin-top:2px}
+.x{margin-left:auto;background:none;border:none;font-size:22px;line-height:1;color:var(--muted)}
+.dbody{padding:18px 20px}
+.dbody h3{font-size:14px;font-weight:600;margin:0 0 8px;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.hist{list-style:none;margin:0;padding:0}
+.hist li{padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.hist .d{color:var(--muted);font-size:13px;margin-bottom:2px}
+.hist .n{white-space:pre-wrap}
+.hist .e{float:right;background:none;border:none;color:var(--green);font-size:13px;padding:0}
+.hist .tag{font-size:11px;color:var(--muted)}
+.pill.admin{background:#ece8f7;color:#5b3fa0}
+.famlist{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:6px;padding:8px 10px;max-height:160px;overflow:auto;font-size:14px}
+.famlist label{display:flex;align-items:center;gap:8px;margin:0;color:var(--ink);font-size:14px}
+.famlist input{width:auto}
+.chk{display:flex;flex-wrap:wrap;gap:6px 14px;padding:6px 0}
+.chk label{display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:14px}
+.chk input{width:auto}
+#fCancel{margin-left:10px;background:none;border:none;color:var(--muted);font-size:13px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:10}
+
+/* manager tools */
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+#upModal{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px}
+.upbox{background:var(--paper);border-radius:12px;padding:26px 28px;width:100%;max-width:560px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.upbox h2{margin:0 0 16px;font-size:20px}
+.bignums{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+#busy{position:fixed;inset:0;background:rgba(255,255,255,.85);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:18px;font-weight:500}
+#busy .sp{width:36px;height:36px;border:4px solid var(--line);border-top-color:var(--green);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.bignums div{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;text-align:center}
+.bignums b{display:block;font-size:34px;font-weight:600;line-height:1.1}
+.bignums b.ok{color:var(--green)} .bignums b.bad{color:var(--warn)}
+.bignums span{font-size:12px;color:var(--muted)}
+#upDetail{margin:14px 0 0;padding-left:18px;font-size:14px;color:var(--muted)}
+#upDetail li{margin:3px 0}
+#toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);background:var(--green);color:#fff;padding:12px 22px;border-radius:8px;font-size:15px;font-weight:500;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:30}
+@media (max-width:700px){
+  .bar{gap:10px} .who{display:none}
+  .famcol{display:none}
+  td.note{max-width:200px}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="card">
+    <h1>Client Touch Tracker</h1>
+    <p>Green Hedge Capital</p>
+    <label>Email</label>
+    <input id="email" type="email" autocomplete="username">
+    <label>Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" id="loginBtn" style="width:100%">Sign in</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header><div class="bar">
+    <div class="brand"><span>GHC</span> Touch Tracker <span style="color:var(--muted);font-weight:400;font-size:12px">· v3.8</span></div>
+    <div class="spacer"></div>
+    <div class="who" id="who"></div>
+    <button class="btn ghost small hidden" id="usersBtn">Users</button>
+    <button class="btn ghost small" id="pwBtn">Change my password</button>
+    <button class="btn ghost small" id="logout">Sign out</button>
+  </div></header>
+
+  <main>
+    <div class="band">
+      <div class="grp"><div class="rvhead">Client touch — this quarter</div><div class="stats" id="stats"></div><div class="fml">Touch done = (Declined + Interested + Executed) ÷ Total &nbsp;·&nbsp; Productive = Executed ÷ Total</div></div>
+      <div class="grp"><div class="rvhead">Written review — this quarter</div><div class="stats" id="rvstats"></div><div class="fml">Review done = (Declined + Interested + Executed) ÷ Total &nbsp;·&nbsp; Productive = Executed ÷ Total</div></div>
+      <div class="grp" id="adgrp"><div class="rvhead" id="adhead">Admin touched — by RM</div><div class="stats" id="adstats"></div></div>
+    </div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search name, PAN, family, note">
+      <button class="btn ghost small hidden" id="clearF" style="color:var(--warn);border-color:var(--warn)">Clear filters ×</button>
+      <select id="rmSel" class="hidden"></select>
+      <select id="qtr"></select>
+      <label class="toggle"><input type="checkbox" id="famGroup"> Group by family</label>
+      <button class="btn ghost small" id="logAny">Log a touch</button>
+      <span class="tools hidden" id="mgrTools">
+        <button class="btn ghost small" id="uploadBtn">Upload clients</button>
+        <input type="file" id="uploadFile" accept=".xlsx,.xls,.csv" class="hidden">
+        <button class="btn ghost small" id="exportBtn">Backup</button>
+        <button class="btn ghost small" id="reportsBtn">Reports</button>
+
+      </span>
+    </div>
+
+    <div id="lastUp" class="hidden" style="font-size:13px;color:var(--muted);margin:-4px 0 12px"></div>
+    <div class="pager" id="pagerTop"></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th class="sort" data-k="name">Client</th><th class="sort famcol" data-k="family">Family head</th><th class="sort" data-k="status">Touch</th><th class="sort" data-k="last">Last touch</th><th class="sort" data-k="review">Review</th><th class="sort" data-k="expected">Expected sale</th><th class="sort rmcol side" data-k="rm">RM</th><th class="sort side" data-k="lead">Lead advisory</th>
+        </tr>
+        <tr class="filters">
+          <th><input data-f="name" placeholder="filter"></th>
+          <th class="famcol"><input data-f="family" placeholder="filter"></th>
+          <th><select data-f="status"><option value="">all</option><option>no answer</option><option>discussing</option><option>declined</option><option>interested</option><option>executed</option><option>avoiding</option><option value="none">none</option></select></th>
+          <th></th>
+          <th><select data-f="review"><option value="">all</option><option>sent</option><option>discussing</option><option>declined</option><option>interested</option><option>executed</option><option>avoiding</option><option value="none">none</option></select></th>
+          <th></th>
+          <th class="rmcol side"><input data-f="rm" placeholder="filter"></th>
+          <th class="side"><input data-f="lead" placeholder="filter"></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty hidden" id="empty"></div>
+    </div>
+    <div class="pager" id="pagerBot"></div>
+    <div id="adminFoot" class="hidden" style="margin-top:40px;text-align:right">
+      <button id="restoreBtn" style="background:none;border:none;color:#b8bdb9;font-size:11px;text-decoration:underline;padding:0;margin-right:16px">restore from backup</button>
+      <button id="clearBtn" style="background:none;border:none;color:#b8bdb9;font-size:11px;text-decoration:underline;padding:0">clear all clients</button>
+      <input type="file" id="restoreFile" accept=".xlsx" class="hidden">
+    </div>
+  </main>
+</div>
+
+<!-- CLIENT DRAWER -->
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead">
+    <div>
+      <h2 id="dName"></h2>
+      <div class="meta" id="dMeta"></div>
+    </div>
+    <button class="x" id="dClose" aria-label="Close">×</button>
+  </div>
+  <div class="dbody">
+    <h3 id="fTitle">Log a touch</h3>
+    <div id="pickWrap" class="hidden">
+      <label>Client</label>
+      <input id="pickClient" list="clientList" placeholder="Start typing a name">
+      <datalist id="clientList"></datalist>
+    </div>
+    <div id="asWrap" class="hidden"><label>Logging as</label><select id="fAs"></select></div>
+    <div class="grid2">
+      <div><label>Date</label><input type="date" id="fDate"></div>
+      <div><label>Type (tick all that apply)</label><div class="chk" id="fType">
+        <label><input type="checkbox" value="sales"> Sales</label><label><input type="checkbox" value="relationship"> Relationship</label>
+      </div></div>
+      <div><label>Mode (tick all that apply)</label><div class="chk" id="fMode">
+        <label><input type="checkbox" value="call"> Call</label><label><input type="checkbox" value="meeting"> Meeting</label><label><input type="checkbox" value="message"> Message</label>
+      </div></div>
+      <div><label>Status</label><select id="fStatus">
+        <option>no answer</option><option>discussing</option><option>declined</option><option>interested</option><option>executed</option><option>avoiding</option><option>none</option>
+      </select></div>
+    </div>
+    <div id="famWrap" class="hidden">
+      <label>Also log this touch for family members</label>
+      <div id="famList" class="famlist"></div>
+    </div>
+    <label>Note</label>
+    <textarea id="fNote" rows="3" placeholder="e.g. Will park 10 lakh next month"></textarea>
+    <label style="color:var(--hot)">Expected sale date (optional)</label>
+    <input type="date" id="fExpected" style="background:var(--hot-soft);border-color:#e3b98a">
+    <div class="err" id="fErr"></div>
+    <button class="btn" id="fSave">Save touch</button><button id="fCancel" class="hidden">Cancel edit</button>
+
+    <div class="rvbox" id="rvbox">
+      <h3>Written review — <span id="rvQ"></span></h3>
+      <div class="grid2">
+        <div><label>Status</label><select id="rvStatus">
+          <option value="" disabled>— select —</option><option>sent</option><option>discussing</option><option>declined</option><option>interested</option><option>executed</option><option>avoiding</option><option value="none">none (remove)</option>
+        </select></div>
+        <div><label>Sent on</label><input type="date" id="rvDate"></div>
+      </div>
+      <div id="rvFamWrap" class="hidden">
+        <label>Also mark this review for family members</label>
+        <div id="rvFamList" class="famlist"></div>
+      </div>
+      <label>Review note — what was done</label>
+      <textarea id="rvNote" rows="2" placeholder="e.g. Sent portfolio review PDF on WhatsApp, follow-up Friday"></textarea>
+      <div class="err" id="rvErr"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn" id="rvSave">Save review</button>
+        <button class="btn blue" id="fBoth">Save touch + review</button>
+      </div>
+      <h3 style="margin-top:16px">Review history</h3>
+      <ul class="hist" id="rvHist"></ul>
+    </div>
+    <h3 style="margin-top:26px">History</h3>
+    <ul class="hist" id="hist"></ul>
+  </div>
+</aside>
+
+<div id="toast" class="hidden"></div>
+<div id="busy" class="hidden"><div class="sp"></div><div id="busyTxt">Uploading…</div><div style="font-size:13px;color:var(--muted)">Please wait, do not close this tab</div></div>
+<div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:1000px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">Reports</h2>
+      <select id="repSel" style="width:auto"><option value="lead">1. Lead advisory efficiency</option><option value="rm">2. RM wise efficiency</option></select>
+      <span id="repQ" style="color:var(--muted);font-size:13px"></span>
+      <button class="btn ghost small" id="repXls">Export to Excel</button>
+      <button class="btn small" id="repPdf">Management PDF</button>
+      <button class="x" id="repClose">×</button>
+    </div>
+    <div class="fml" style="margin:8px 0 10px">Efficiency = All touch ÷ Clients · Review efficiency = All review ÷ Clients · Touch done = (Declined + Interested + Executed) ÷ Clients · Productive = Executed ÷ Clients · Review columns use the same logic on written reviews</div>
+    <div class="tablewrap"><table id="repTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+<div id="usersModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:760px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center"><h2 style="margin:0">Users</h2><button class="x" id="usersClose">×</button></div>
+    <div class="tablewrap" style="margin:14px 0"><table style="font-size:13px"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody id="usersRows"></tbody></table></div>
+    <h3 style="font-size:14px;margin:0 0 4px">Add user</h3>
+    <div class="grid2">
+      <div><label>Full name</label><input id="nuName"></div>
+      <div><label>Email</label><input id="nuEmail" type="email"></div>
+      <div><label>Role</label><select id="nuRole"><option value="rm">RM</option><option value="manager">Sub admin</option><option value="admin">Super admin</option></select></div>
+      <div><label>Starting password</label><input id="nuPass" placeholder="min 6 characters"></div>
+    </div>
+    <div class="err" id="nuErr"></div>
+    <button class="btn" id="nuAdd">Add user</button>
+  </div>
+</div>
+<div id="upModal" class="hidden">
+  <div class="upbox">
+    <h2>Confirm upload</h2>
+    <div class="bignums">
+      <div><b id="upIn">0</b><span>rows in Excel</span></div>
+      <div><b id="upGo" class="ok">0</b><span>will upload</span></div>
+      <div><b id="upSkip" class="bad">0</b><span>skipped</span></div>
+      <div><b id="upNoRm" class="bad">0</b><span>no RM assigned</span></div>
+      <div><b id="upGone" class="bad">0</b><span>in app, not in Excel</span></div>
+    </div>
+    <label id="upGoneWrap" class="hidden" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;color:var(--warn);font-size:14px">
+      <input type="checkbox" id="upGoneDel" style="width:auto;margin-top:3px"> <span id="upGoneTxt"></span>
+    </label>
+    <ul id="upDetail"></ul>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+      <button class="btn ghost" id="upCancel">Cancel</button>
+      <button class="btn" id="upOk">Upload</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== CONFIG ===== */
+const SUPABASE_URL = "https://smxmxrajahsajuwavzlb.supabase.co";
+const SUPABASE_KEY = "sb_publishable_xQ6tkpeP0VVnp53eKVzqBw_UURnzkuW";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ===== STATE ===== */
+let me = null, profile = null, profiles = [], clients = [], touches = [], reviews = [], reviewLog = [], touchLog = [];
+let filter = { stat: "all", rm: "all", q: "", qtr: null, sort: "name", dir: 1, cols: {} };
+let page = 1, pageSize = 100;
+let openClientId = null, editingId = null;
+
+/* ===== HELPERS ===== */
+const $ = id => document.getElementById(id);
+const esc = s => (s ?? "").toString().replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = d => d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", {day:"2-digit", month:"short"}) : "—";
+const today = () => new Date().toISOString().slice(0,10);
+function toast(msg, ms = 2500){ $("toast").textContent = msg; $("toast").classList.remove("hidden"); setTimeout(()=>$("toast").classList.add("hidden"), ms); }
+
+// Indian financial-year quarters
+function quarterOf(date){
+  const y = date.getFullYear(), m = date.getMonth();
+  const qi = m >= 3 ? Math.floor((m - 3) / 3) : 3;          // 0..3 (Apr-Jun=0 ... Jan-Mar=3)
+  const fyStart = m >= 3 ? y : y - 1;
+  const startMonth = [3, 6, 9, 0][qi];
+  const startYear = qi === 3 ? fyStart + 1 : fyStart;
+  const start = new Date(startYear, startMonth, 1);
+  const end = new Date(startYear, startMonth + 3, 0);
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return { key: iso(start), start: iso(start), end: iso(end),
+    label: `Q${qi+1} FY${String(fyStart).slice(2)}-${String(fyStart+1).slice(2)} (${start.toLocaleString("en-IN",{month:"short"})}–${end.toLocaleString("en-IN",{month:"short"})} ${end.getFullYear()})` };
+}
+function quarterList(n = 6){
+  const out = []; let d = new Date();
+  for (let i = 0; i < n; i++){ const q = quarterOf(d); out.push(q); d = new Date(q.start + "T00:00:00"); d.setDate(d.getDate() - 1); }
+  return out;
+}
+
+async function fetchAll(table, select, order){
+  let out = [], from = 0, size = 1000;
+  while (true){
+    let q = sb.from(table).select(select).range(from, from + size - 1);
+    if (order) q = q.order(order.col, { ascending: order.asc ?? true });
+    const { data, error } = await q;
+    if (error) throw error;
+    out = out.concat(data);
+    if (data.length < size) break;
+    from += size;
+  }
+  return out;
+}
+
+/* ===== AUTH ===== */
+$("loginBtn").onclick = async () => {
+  $("loginErr").textContent = ""; $("loginBtn").disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+  $("loginBtn").disabled = false;
+  if (error) $("loginErr").textContent = "Wrong email or password.";
+};
+$("password").addEventListener("keydown", e => { if (e.key === "Enter") $("loginBtn").click(); });
+$("logout").onclick = () => sb.auth.signOut();
+
+sb.auth.onAuthStateChange(async (_e, session) => {
+  if (session?.user){ me = session.user; await boot(); }
+  else { me = null; $("app").classList.add("hidden"); $("login").classList.remove("hidden"); }
+});
+
+/* ===== LOAD ===== */
+async function boot(){
+  try {
+    profiles = await fetchAll("profiles", "id, full_name, role, email");
+    profile = { ...(profiles.find(p => p.id === me.id) || { full_name: me.email, role: "rm" }) };
+    clients = await fetchAll("clients", "id, client_code, name, pan, family_head, family_head_pan, rm_id, lead_advisory, mf_rm_name", { col: "name" });
+    reviews = await fetchAll("reviews", "id, client_id, rm_id, quarter_start, status, sent_date, note, updated_at");
+    touchLog = await fetchAll("touch_log", "id, touch_id, client_id, rm_id, touch_date, mode, status, touch_type, note, expected_date, logged_at", { col: "logged_at", asc: false });
+    reviewLog = await fetchAll("review_log", "id, client_id, rm_id, quarter_start, status, sent_date, note, logged_at", { col: "logged_at", asc: false });
+    touches = await fetchAll("touches", "id, client_id, rm_id, touch_date, mode, status, touch_type, note, expected_date, created_at, edited_at", { col: "created_at", asc: false });
+  } catch (e){ alert("Could not load data: " + e.message); return; }
+
+  if (profile.role === "manager") showLastUpload();
+  $("adminFoot").classList.toggle("hidden", !isSuper);
+  $("who").textContent = `${profile.full_name} · ${profile.realRole === "admin" ? "Super admin" : profile.role === "manager" ? "Sub admin" : "RM"}`;
+  const isMgr = profile.role === "manager" || profile.role === "admin";
+  const isSuper = profile.role === "admin" || (me.email || "").toLowerCase() === "rasmeet.sethi@greenhedgecapital.com";
+  if (isMgr) profile.role = "manager", profile.realRole = isSuper ? "admin" : "manager";
+  $("mgrTools").classList.toggle("hidden", !isMgr);
+  $("usersBtn").classList.toggle("hidden", !isSuper);
+  $("rmSel").classList.toggle("hidden", !isMgr);
+  document.body.classList.toggle("is-rm", !isMgr);
+  if (isMgr){
+    $("rmSel").innerHTML = `<option value="all">All RMs</option>` +
+      profiles.filter(p => p.role === "rm").map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
+  }
+  const qs = quarterList();
+  $("qtr").innerHTML = qs.map(q => `<option value="${q.key}">${esc(q.label)}</option>`).join("");
+  filter.qtr = qs[0];
+  $("login").classList.add("hidden"); $("app").classList.remove("hidden");
+  render();
+}
+
+/* ===== DERIVED ===== */
+function enrich(){
+  const byClient = {};
+  for (const t of touches){ (byClient[t.client_id] ||= []).push(t); }
+  const { start, end } = filter.qtr;
+  return clients.map(c => {
+    const list = (byClient[c.id] || []).slice().sort((a,b) => (b.touch_date+b.created_at).localeCompare(a.touch_date+a.created_at));
+    const last = list[0] || null;
+    const inQ = list.filter(t => t.touch_date >= start && t.touch_date <= end);
+    const rm = profiles.find(p => p.id === c.rm_id);
+    const review = reviews.find(r => r.client_id === c.id && r.quarter_start === start) || null;
+    const rvs = review ? review.status : null;
+    const lastQ = inQ[0] || null;
+    const ts = lastQ ? lastQ.status : "none";
+    const expT = list.find(t => t.expected_date);
+    return { ...c, list, last, inQ, touched: inQ.length > 0, expected: expT ? expT.expected_date : null, rmEmail: rm ? (rm.email || "") : "",
+      ts, rs: rvs || "none",
+      adminTouched: inQ.some(t => isAdminTouch(t)),
+      review,
+      rmName: rm ? rm.full_name : "—" };
+  });
+}
+
+function pillClass(status){
+  return ({ "no answer":"red", sent:"red", discussing:"hot", declined:"done", interested:"done", executed:"done", avoiding:"mag", none:"talk" })[status] || "none";
+}
+const dotCls = st => (st || "").replace(/ /g, "-");
+
+/* ===== RENDER ===== */
+function render(){
+  let all = enrich();
+  if (profile.role === "manager" && filter.rm !== "all") all = all.filter(c => c.rm_id === filter.rm);
+
+  const T = all.length, pct = n => T ? Math.round(n / T * 100) + "%" : "0%";
+  const tile = (k, l, v, cls = "") => `<div class="stat ${cls} ${filter.stat===k?"active":""}" data-k="${k}"><b>${v}</b><span>${l}</span></div>`;
+  const cnt = (f, v) => all.filter(c => c[f] === v).length;
+  const tDone = cnt("ts","declined") + cnt("ts","interested") + cnt("ts","executed");
+  const tAll = all.filter(c => c.ts !== "none").length, rAll = all.filter(c => c.rs !== "none").length;
+  $("stats").innerHTML = tile("all","Total",T) + tile("tall","All touch",tAll) + tile("t:no answer","No answer",cnt("ts","no answer"),"red") + tile("t:discussing","Discussing",cnt("ts","discussing"),"amb")
+    + tile("t:declined","Declined",cnt("ts","declined"),"grn") + tile("t:interested","Interested",cnt("ts","interested"),"grn") + tile("t:executed","Executed",cnt("ts","executed"),"grn")
+    + tile("t:avoiding","Avoiding",cnt("ts","avoiding"),"mag") + tile("t:none","None",cnt("ts","none"))
+    + tile("tdone","Touch done",pct(tDone),"pct") + tile("t:executed","Productive",pct(cnt("ts","executed")),"pct");
+  const rDone = cnt("rs","declined") + cnt("rs","interested") + cnt("rs","executed");
+  $("rvstats").innerHTML = tile("all","Total",T) + tile("rall","All review",rAll) + tile("r:sent","Sent",cnt("rs","sent"),"red") + tile("r:discussing","Discussing",cnt("rs","discussing"),"amb")
+    + tile("r:declined","Declined",cnt("rs","declined"),"grn") + tile("r:interested","Interested",cnt("rs","interested"),"grn") + tile("r:executed","Executed",cnt("rs","executed"),"grn")
+    + tile("r:avoiding","Avoiding",cnt("rs","avoiding"),"mag") + tile("r:none","None",cnt("rs","none"))
+    + tile("rdone","Review done",pct(rDone),"pct") + tile("r:executed","Productive",pct(cnt("rs","executed")),"pct");
+  const adAll = enrich().filter(c => c.adminTouched);
+  const byRm = {}; adAll.forEach(c => (byRm[c.rm_id || "none"] ||= { name: c.rmName, n: 0 }).n++);
+  const adCards = (profile.role === "manager" ? [["all", "All RMs", adAll.length]] : [])
+    .concat(Object.entries(byRm).filter(([id]) => profile.role === "manager" || id === me.id).sort((a,b) => b[1].n - a[1].n).map(([id, v]) => [id, v.name, v.n]));
+  $("adstats").innerHTML = adCards.map(([id, name, n]) => `<div class="stat adminTouched ${filter.stat === "adminTouched" && filter.adRm === id ? "active" : ""}" data-k="adminTouched" data-rm="${id}"><b>${n}</b><span>Admin · ${esc(name)}</span></div>`).join("")
+    || `<div class="stat"><b>0</b><span>No admin touches yet</span></div>`;
+  $("adgrp").classList.toggle("hidden", adCards.length === 0);
+  document.querySelectorAll(".stat").forEach(el => el.onclick = () => {
+    const same = filter.stat === el.dataset.k && (el.dataset.rm || "all") === (filter.adRm || "all");
+    filter.stat = same ? "all" : el.dataset.k; filter.adRm = same ? "all" : (el.dataset.rm || "all"); page = 1; render();
+  });
+
+  let rows = all;
+  if (filter.stat.startsWith("t:")) rows = rows.filter(c => c.ts === filter.stat.slice(2));
+  else if (filter.stat.startsWith("r:")) rows = rows.filter(c => c.rs === filter.stat.slice(2));
+  else if (filter.stat === "tall") rows = rows.filter(c => c.ts !== "none");
+  else if (filter.stat === "rall") rows = rows.filter(c => c.rs !== "none");
+  else if (filter.stat === "tdone") rows = rows.filter(c => ["declined","interested","executed"].includes(c.ts));
+  else if (filter.stat === "rdone") rows = rows.filter(c => ["declined","interested","executed"].includes(c.rs));
+  else if (filter.stat !== "all") rows = rows.filter(c => c[filter.stat]);
+  if (filter.stat === "adminTouched" && filter.adRm && filter.adRm !== "all") rows = rows.filter(c => (c.rm_id || "none") === filter.adRm);
+  const q = filter.q.toLowerCase();
+  if (q) rows = rows.filter(c =>
+    [c.name, c.pan, c.family_head, c.family_head_pan, c.client_code, c.last?.note].some(v => (v||"").toLowerCase().includes(q)));
+  const cf = filter.cols;
+  if (cf.rm) rows = rows.filter(c => c.rmName.toLowerCase().includes(cf.rm));
+  if (cf.name) rows = rows.filter(c => (c.name + " " + (c.pan||"")).toLowerCase().includes(cf.name));
+  if (cf.status) rows = rows.filter(c => c.ts === cf.status);
+  if (cf.family) rows = rows.filter(c => ((c.family_head||"") + " " + (c.family_head_pan||"")).toLowerCase().includes(cf.family));
+  if (cf.lead) rows = rows.filter(c => (c.lead_advisory||"").toLowerCase().includes(cf.lead));
+  if (cf.review) rows = rows.filter(c => c.rs === cf.review);
+
+  const keyOf = c => ({
+    rm: c.rmName.toLowerCase() + " " + c.name.toLowerCase(), name: c.name.toLowerCase(),
+    status: c.ts === "none" ? null : ({ "no answer":1, discussing:2, declined:3, interested:4, executed:5, avoiding:6 })[c.ts], last: c.last?.touch_date || null,
+    family: c.family_head ? c.family_head.toLowerCase() : null, expected: c.expected || null,
+    lead: c.lead_advisory ? c.lead_advisory.toLowerCase() : null,
+    review: c.review ? ({ sent:1, discussing:2, declined:3, interested:4, executed:5, avoiding:6 })[c.review.status] : null,
+  })[filter.sort];
+  rows = rows.slice().sort((a,b) => {
+    const ka = keyOf(a), kb = keyOf(b);
+    if (ka == null && kb == null) return 0;
+    if (ka == null) return 1;            // blanks always last
+    if (kb == null) return -1;
+    return ka < kb ? -filter.dir : ka > kb ? filter.dir : 0;
+  });
+  document.querySelectorAll("th.sort").forEach(th => {
+    th.classList.toggle("on", th.dataset.k === filter.sort);
+    th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === filter.sort ? (filter.dir === 1 ? " ▲" : " ▼") : "");
+    th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); };
+  });
+
+  const row = c => `<tr class="row" data-id="${c.id}">
+    <td><div>${esc(c.name)}</div><div style="font-size:12px;color:var(--muted)">${esc(c.pan||"")}</div></td>
+    <td class="famcol">${esc(c.family_head||"")}</td>
+    <td class="st"><span class="dot ${dotCls(c.ts)}"></span><span class="lbl">${esc(c.ts)}</span>${c.list.slice(0,2).map(t => `<div class="n"><b>${fmt(t.touch_date)}</b>${isAdminTouch(t) ? `<span class="pill admin" style="margin-right:4px">Admin</span>` : ""}${esc(t.note || t.status)}</div>`).join("")}</td>
+    <td>${c.last ? fmt(c.last.touch_date) : "—"}</td>
+    <td class="st"><span class="dot ${dotCls(c.rs)}"></span><span class="lbl">${esc(c.rs)}${c.review && c.review.sent_date ? " · " + fmt(c.review.sent_date) : ""}</span>${c.review && c.review.note ? `<div class="n">${esc(c.review.note)}</div>` : ""}</td>
+    <td>${c.expected ? fmt(c.expected) : "—"}</td>
+    <td class="rmcol side"><div>${esc(c.rmName)}</div><div style="font-size:11px;color:var(--muted)">${esc((c.rmEmail||"").split("@")[0])}</div><div style="font-size:11px;color:var(--muted)">${c.rmEmail ? "@" + esc(c.rmEmail.split("@")[1] || "") : ""}</div></td>
+    <td class="side">${esc(c.lead_advisory||"")}</td></tr>`;
+
+  const total = rows.length, pages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(total / pageSize));
+  if (page > pages) page = pages;
+  const from = pageSize === "all" ? 0 : (page - 1) * pageSize, to = pageSize === "all" ? total : Math.min(total, from + pageSize);
+  const pageRows = rows.slice(from, to);
+  const pagerHtml = `<span>${total ? from + 1 : 0}–${to} of ${total}</span>
+    <button class="btn ghost small" data-pg="prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button>
+    <span>Page ${page} / ${pages}</span>
+    <button class="btn ghost small" data-pg="next" ${page >= pages ? "disabled" : ""}>Next ›</button>
+    <select data-pg="size">${[100,150,200,250,300,"all"].map(n => `<option value="${n}" ${String(pageSize) === String(n) ? "selected" : ""}>${n === "all" ? "All" : n + " / page"}</option>`).join("")}</select>`;
+  $("pagerTop").innerHTML = pagerHtml; $("pagerBot").innerHTML = pagerHtml;
+  document.querySelectorAll("[data-pg]").forEach(el => {
+    if (el.dataset.pg === "prev") el.onclick = () => { page--; render(); window.scrollTo(0, 0); };
+    if (el.dataset.pg === "next") el.onclick = () => { page++; render(); window.scrollTo(0, 0); };
+    if (el.dataset.pg === "size") el.onchange = () => { pageSize = el.value === "all" ? "all" : +el.value; page = 1; render(); };
+  });
+  rows = pageRows;
+  let html = "";
+  if ($("famGroup").checked){
+    const groups = {}, labels = {};
+    rows.forEach(c => { const k = c.family_head_pan || c.family_head || "zzz"; (groups[k] ||= []).push(c); labels[k] ||= c.family_head || "No family head"; });
+    Object.keys(groups).sort((a,b) => labels[a].localeCompare(labels[b])).forEach(k => {
+      html += `<tr class="fam"><td colspan="8">${esc(labels[k])}${k !== labels[k] && k !== "zzz" ? " · " + esc(k) : ""} · ${groups[k].length}</td></tr>` + groups[k].map(row).join("");
+    });
+  } else html = rows.map(row).join("");
+
+  const active = filter.q || filter.stat !== "all" || Object.values(filter.cols).some(v => v);
+  $("clearF").classList.toggle("hidden", !active);
+  $("rows").innerHTML = html;
+  $("empty").classList.toggle("hidden", rows.length > 0);
+  $("empty").textContent = clients.length ? "No clients match this filter." : "No clients yet. Upload the client list to begin.";
+  document.querySelectorAll("tr.row").forEach(el => el.onclick = () => openDrawer(el.dataset.id));
+}
+
+$("q").oninput = e => { filter.q = e.target.value; page = 1; render(); };
+function renderKeep(id){
+  const y = window.scrollY, wrap = document.querySelector(".tablewrap"), t = wrap.scrollTop;
+  render();
+  window.scrollTo(0, y); wrap.scrollTop = t;
+  const tr = document.querySelector(`tr.row[data-id="${id}"]`);
+  if (tr){ tr.classList.add("flash"); tr.scrollIntoView({ block: "nearest" }); setTimeout(() => tr.classList.remove("flash"), 1500); }
+}
+function clearFilters(){
+  filter.q = ""; filter.cols = {}; filter.stat = "all"; filter.adRm = "all"; page = 1; $("q").value = "";
+  document.querySelectorAll("tr.filters [data-f]").forEach(el => el.value = "");
+  render();
+}
+$("clearF").onclick = clearFilters;
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("drawer").classList.contains("open")) clearFilters(); });
+document.querySelectorAll("tr.filters [data-f]").forEach(el => el.oninput = el.onchange = () => { filter.cols[el.dataset.f] = el.value.trim().toLowerCase(); page = 1; render(); });
+$("rmSel").onchange = e => { filter.rm = e.target.value; page = 1; render(); };
+$("qtr").onchange = e => { filter.qtr = quarterList().find(q => q.key === e.target.value); render(); };
+$("famGroup").onchange = render;
+
+/* ===== DRAWER ===== */
+function openDrawer(id){
+  openClientId = id;
+  const c = enrich().find(x => x.id === id);
+  $("pickWrap").classList.toggle("hidden", !!c);
+  if (c){
+    $("dName").textContent = c.name;
+    $("dMeta").textContent = [c.pan, c.family_head && ("Family: " + c.family_head), profile.role === "manager" && ("RM: " + c.rmName + (c.mf_rm_name && c.mf_rm_name.toLowerCase() !== c.rmName.toLowerCase() ? " (Zoho: " + c.mf_rm_name + ")" : "")), c.lead_advisory && ("Lead: " + c.lead_advisory)].filter(Boolean).join(" · ");
+    $("hist").innerHTML = c.list.length ? c.list.map(t => `<li>
+      ${(t.rm_id === me.id || profile.role === "manager") ? `<button class="e" data-id="${t.id}">Edit</button>` : ""}
+      <div class="d">${isAdminTouch(t) ? `<span class="pill admin">Admin</span> ` : ""}${fmt(t.touch_date)} · ${esc(t.mode)} · ${esc(t.touch_type)} · <span class="pill ${pillClass(t.status)}">${esc(t.status)}</span>${t.edited_at ? ` <span class="tag">edited ${new Date(t.edited_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</span>` : ""}</div>
+      <div class="n">${esc(t.note||"")}${t.expected_date ? ` <span class="pill talk">expected ${fmt(t.expected_date)}</span>` : ""}</div>
+      ${touchLog.filter(l => l.touch_id === t.id).map(l => `<div class="n" style="color:var(--muted);font-size:12px;padding-left:10px;border-left:2px solid var(--line);margin-top:4px">earlier · ${fmt(l.touch_date)} · ${esc(l.status)} · ${esc(l.note || "")}</div>`).join("")}</li>`).join("") : `<li style="color:var(--muted)">No touches yet.</li>`;
+  } else {
+    $("dName").textContent = "Log a touch"; $("dMeta").textContent = ""; $("hist").innerHTML = "";
+    $("famWrap").classList.add("hidden"); $("famList").innerHTML = "";
+    $("pickClient").value = "";
+    const mine = profile.role === "manager" ? clients : clients.filter(x => x.rm_id === me.id);
+    $("clientList").innerHTML = mine.map(x => `<option value="${esc(x.name)}${x.pan ? " ("+esc(x.pan)+")" : ""}">`).join("");
+  }
+  document.querySelectorAll(".hist .e").forEach(b => b.onclick = () => startEdit(b.dataset.id));
+  if (profile.role === "manager"){
+    const rmOpt = c && c.rm_id ? `<option value="${c.rm_id}">${esc(c.rmName)} (RM)</option>` : "";
+    $("fAs").innerHTML = rmOpt + `<option value="${me.id}">Admin · ${esc(profile.full_name)}</option>`;
+    $("fAs").value = c && c.rm_id ? c.rm_id : me.id;
+    $("asWrap").classList.remove("hidden");
+  }
+  $("rvbox").classList.toggle("hidden", !c);
+  if (c){
+    $("rvQ").textContent = filter.qtr.label.split(" (")[0];
+    const r = c.review;
+    $("rvStatus").value = r ? r.status : ""; $("rvDate").value = r && r.sent_date ? r.sent_date : today(); $("rvNote").value = r ? (r.note || "") : ""; $("rvErr").textContent = "";
+    const rl = reviewLog.filter(x => x.client_id === c.id);
+    $("rvHist").innerHTML = rl.length ? rl.map(x => `<li><div class="d">${new Date(x.logged_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})} · <span class="pill ${pillClass(x.status)}">${esc(x.status)}</span>${x.sent_date ? " · sent " + fmt(x.sent_date) : ""}${isAdminTouch(x) ? ` <span class="pill admin">Admin</span>` : ""}</div><div class="n">${esc(x.note || "")}</div></li>`).join("") : `<li style="color:var(--muted)">No review history yet.</li>`;
+    const fam = familyOf(c);
+    $("famWrap").classList.toggle("hidden", fam.length === 0);
+    const famHtml = `<label style="font-weight:600"><input type="checkbox" class="selall"> Select all (${fam.length})</label>` +
+      fam.map(m => `<label><input type="checkbox" value="${m.id}"> ${esc(m.name)}${m.pan ? ` <span style="color:var(--muted);font-size:12px">${esc(m.pan)}</span>` : ""}</label>`).join("");
+    $("famList").innerHTML = famHtml;
+    $("rvFamWrap").classList.toggle("hidden", fam.length === 0);
+    $("rvFamList").innerHTML = famHtml;
+    document.querySelectorAll(".famlist .selall").forEach(sa => sa.onchange = () => sa.closest(".famlist").querySelectorAll("input:not(.selall)").forEach(i => i.checked = sa.checked));
+  }
+  resetForm();
+  $("drawer").classList.add("open"); $("overlay").classList.remove("hidden");
+}
+function getChk(id){ return [...document.querySelectorAll(`#${id} input:checked`)].map(i => i.value).join(", "); }
+function setChk(id, val){ const set = new Set((val || "").split(/[,&]/).map(v => v.trim())); document.querySelectorAll(`#${id} input`).forEach(i => i.checked = set.has(i.value)); }
+function isAdminTouch(t){ const p = profiles.find(x => x.id === t.rm_id); return p && (p.role === "manager" || p.role === "admin"); }
+function familyOf(c){
+  const key = c.family_head_pan || c.family_head; if (!key) return [];
+  return clients.filter(x => x.id !== c.id && (x.family_head_pan || x.family_head) === key);
+}
+function resetForm(){
+  editingId = null;
+  $("fTitle").textContent = "Log a touch"; $("fSave").textContent = "Save touch"; $("fCancel").classList.add("hidden");
+  $("fDate").value = today(); $("fNote").value = ""; $("fExpected").value = ""; $("fErr").textContent = "";
+  setChk("fMode", "call"); $("fStatus").value = "discussing"; setChk("fType", "sales, relationship");
+  if ($("famList").innerHTML) $("famWrap").classList.remove("hidden");
+  document.querySelectorAll("#famList input").forEach(i => i.checked = false);
+}
+function startEdit(id){
+  const t = touches.find(x => x.id === id); if (!t) return;
+  editingId = id;
+  $("fTitle").textContent = "Edit touch"; $("fSave").textContent = "Update touch"; $("fCancel").classList.remove("hidden");
+  $("famWrap").classList.add("hidden");
+  $("fDate").value = t.touch_date; setChk("fMode", t.mode); $("fStatus").value = t.status; setChk("fType", t.touch_type);
+  $("fNote").value = t.note || ""; $("fExpected").value = t.expected_date || "";
+  $("drawer").scrollTo({ top: 0, behavior: "smooth" });
+}
+$("fCancel").onclick = resetForm;
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); openClientId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+$("logAny").onclick = () => openDrawer(null);
+
+$("fSave").onclick = async () => {
+  $("fErr").textContent = "";
+  let client = clients.find(c => c.id === openClientId);
+  if (!client){
+    const v = $("pickClient").value.trim();
+    client = clients.find(x => `${x.name}${x.pan ? " ("+x.pan+")" : ""}` === v) || clients.find(x => x.name.toLowerCase() === v.toLowerCase());
+    if (!client){ $("fErr").textContent = "Pick a client from the list."; return; }
+  }
+  if (!getChk("fMode")){ $("fErr").textContent = "Tick at least one mode."; return; }
+  if (!getChk("fType")){ $("fErr").textContent = "Tick at least one type."; return; }
+  const rec = {
+    client_id: client.id,
+    rm_id: profile.role === "manager" ? ($("fAs").value || me.id) : me.id,
+    touch_date: $("fDate").value || today(),
+    mode: getChk("fMode"), status: $("fStatus").value, touch_type: getChk("fType"),
+    note: $("fNote").value.trim() || null,
+    expected_date: $("fExpected").value || null,
+  };
+  $("fSave").disabled = true;
+  let data, error;
+  if (editingId){
+    const old = touches.find(t => t.id === editingId);
+    if (old){ const lg = await sb.from("touch_log").insert({ touch_id: old.id, client_id: old.client_id, rm_id: old.rm_id, touch_date: old.touch_date, mode: old.mode, status: old.status, touch_type: old.touch_type, note: old.note, expected_date: old.expected_date }).select().single(); if (!lg.error) touchLog.unshift(lg.data); }
+    const upd = { touch_date: rec.touch_date, mode: rec.mode, status: rec.status, touch_type: rec.touch_type, note: rec.note, expected_date: rec.expected_date, edited_at: new Date().toISOString() };
+    ({ data, error } = await sb.from("touches").update(upd).eq("id", editingId).select().single());
+    if (!error) touches = touches.map(t => t.id === editingId ? data : t);
+  } else {
+    ({ data, error } = await sb.from("touches").insert(rec).select().single());
+    if (!error){
+      touches.unshift(data);
+      const ids = [...document.querySelectorAll("#famList input:checked:not(.selall)")].map(i => i.value);
+      let famOk = 0, famFail = 0;
+      for (const id of ids){
+        const m = clients.find(x => x.id === id); if (!m) continue;
+        const r2 = { ...rec, client_id: m.id, rm_id: profile.role === "manager" ? ($("fAs").value === me.id ? me.id : (m.rm_id || me.id)) : me.id,
+          note: (rec.note ? rec.note + " " : "") + "(via " + client.name + ")" };
+        const res = await sb.from("touches").insert(r2).select().single();
+        if (res.error) famFail++; else { famOk++; touches.unshift(res.data); }
+      }
+      if (ids.length) toast(`Saved + ${famOk} family member${famOk === 1 ? "" : "s"}${famFail ? `, ${famFail} failed (different RM)` : ""}`, 3500);
+    }
+  }
+  $("fSave").disabled = false;
+  if (error){ $("fErr").textContent = "Could not save: " + error.message; return; }
+  const wasEdit = !!editingId;
+  closeDrawer();
+  renderKeep(client.id);
+  if (!document.querySelectorAll("#famList input:checked:not(.selall)").length || wasEdit) toast(wasEdit ? "Touch updated ✓" : "Touch saved ✓");
+};
+
+async function showLastUpload(){
+  const { data } = await sb.from("upload_log").select("*").order("uploaded_at", { ascending: false }).limit(1);
+  const u = data && data[0]; if (!u) return;
+  const d = new Date(u.uploaded_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  $("lastUp").innerHTML = `Last upload <b>${d}</b> · <b>${u.rows_in_excel}</b> in Excel · <b style="color:var(--green)">${u.uploaded}</b> uploaded` +
+    (u.skipped ? ` · <b style="color:var(--warn)">${u.skipped}</b> skipped (no client code)` : "") +
+    (u.no_rm ? ` · <b style="color:var(--warn)">${u.no_rm}</b> without RM` : "") + (u.file_name ? ` · ${esc(u.file_name)}` : "");
+  $("lastUp").classList.remove("hidden");
+}
+/* ===== MANAGER: UPLOAD ===== */
+$("uploadBtn").onclick = () => $("uploadFile").click();
+$("uploadFile").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return; e.target.value = "";
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+  const norm = s => s.toString().toLowerCase().replace(/[^a-z]/g, "");
+  const pick = (r, ...keys) => { for (const k of Object.keys(r)) if (keys.includes(norm(k))) return (r[k] ?? "").toString().trim(); return ""; };
+  const byEmail = Object.fromEntries(profiles.filter(p => p.email).map(p => [p.email.toLowerCase(), p.id]));
+  const byName  = Object.fromEntries(profiles.map(p => [p.full_name.toLowerCase(), p.id]));
+  const recs = [], issues = [];
+  const codeRows = {};
+  rows.forEach((r, i) => {
+    const name = pick(r, "fullname", "name", "clientname", "client");
+    const code = pick(r, "wealthelitecustid") || null;
+    const rmKey = pick(r, "mfrmemail").toLowerCase();
+    const rm_id = byEmail[rmKey] || byName[rmKey] || null;
+    const rec = { name, pan: pick(r, "pan", "panno", "pannumber") || null,
+      family_head: pick(r, "familyhead", "family", "head", "familyheadname") || null,
+      family_head_pan: pick(r, "familyheadpan", "headpan", "fhpan", "familypan") || null,
+      client_code: code, rm_id, lead_advisory: pick(r, "leadadvisory") || null, mf_rm_name: pick(r, "mfrm", "mfrmname") || null, _row: i + 2, _src: r, _rm: rmKey };
+    if (!name){ issues.push({ ...r, Issue: "Missing name", "Excel row": i + 2 }); return; }
+    if (!code) issues.push({ ...r, Issue: "Missing client code", "Excel row": i + 2 });
+    if (rmKey && !rm_id) issues.push({ ...r, Issue: `RM "${rmKey}" not found — create this login first`, "Excel row": i + 2 });
+    if (!rmKey) issues.push({ ...r, Issue: "No RM email", "Excel row": i + 2 });
+    if (code) (codeRows[code] ||= []).push(rec);
+    recs.push(rec);
+  });
+  for (const [code, list] of Object.entries(codeRows)){
+    if (list.length < 2) continue;
+    const rms = new Set(list.map(x => x._rm));
+    list.forEach(x => issues.push({ ...x._src, Issue: `Duplicate client code ${code} (rows ${list.map(y => y._row).join(", ")})${rms.size > 1 ? " — different RMs" : ""}`, "Excel row": x._row }));
+  }
+  if (!recs.length){ toast("No rows found. Need a 'Full Name' or 'Name' column."); return; }
+  const fileCodes = new Set(recs.filter(r => r.client_code).map(r => r.client_code));
+  const gone = clients.filter(c => c.client_code && !fileCodes.has(c.client_code));
+  gone.forEach(c => issues.push({ "Full Name": c.name, "PAN No": c.pan || "", "Wealthelite Cust Id.": c.client_code, Issue: "In app but NOT in this Excel — will be deleted only if you tick the box", "Excel row": "" }));
+  if (issues.length){
+    const merged = new Map();
+    for (const it of issues){
+      const key = it["Excel row"] || ("app-" + (it["Wealthelite Cust Id."] || it["Full Name"]));
+      if (merged.has(key)) merged.get(key).Issue += "; " + it.Issue; else merged.set(key, { ...it });
+    }
+    const list = [...merged.values()].map(r => ({ Issue: r.Issue, "Excel row": r["Excel row"], ...Object.fromEntries(Object.entries(r).filter(([k]) => k !== "Issue" && k !== "Excel row")) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list), "Issues");
+    XLSX.writeFile(wb, `upload_issues_${today()}.xlsx`);
+  }
+  const byCode = new Map(); let noCode = 0, noRm = 0, noName = rows.length - recs.length;
+  for (const r of recs){
+    if (!r.client_code){ noCode++; continue; }
+    if (!r.rm_id) noRm++;
+    byCode.set(r.client_code, { name: r.name, pan: r.pan, family_head: r.family_head, family_head_pan: r.family_head_pan, client_code: r.client_code, rm_id: r.rm_id, lead_advisory: r.lead_advisory, mf_rm_name: r.mf_rm_name });
+  }
+  const withCode = [...byCode.values()];
+  const dupes = recs.length - noCode - withCode.length;
+  $("upIn").textContent = rows.length; $("upGo").textContent = withCode.length;
+  $("upSkip").textContent = noCode + noName; $("upNoRm").textContent = noRm;
+  $("upGone").textContent = gone.length; $("upGoneDel").checked = false;
+  $("upGoneWrap").classList.toggle("hidden", gone.length === 0);
+  $("upGoneTxt").textContent = `Delete these ${gone.length} client${gone.length === 1 ? "" : "s"} from the app, including their touch history: ${gone.slice(0,5).map(c => c.name).join(", ")}${gone.length > 5 ? ", …" : ""}`;
+  const det = [];
+  if (noCode) det.push(`${noCode} rows have no client code — skipped, not uploaded.`);
+  if (noName) det.push(`${noName} rows have no name — skipped.`);
+  if (dupes) det.push(`${dupes} duplicate rows (same client code) merged — last row wins.`);
+  if (noRm) det.push(`${noRm} rows have an RM email that doesn't match any login — uploaded without RM.`);
+  if (issues.length) det.push(`An Excel "upload_issues" listing every flagged row has been downloaded.`);
+  if (!det.length) det.push("No issues found.");
+  $("upDetail").innerHTML = det.map(d => `<li>${esc(d)}</li>`).join("");
+  $("upModal").classList.remove("hidden");
+  const go = await new Promise(res => { $("upOk").onclick = () => res(true); $("upCancel").onclick = () => res(false); });
+  $("upModal").classList.add("hidden");
+  if (!go) return;
+  const delGone = gone.length && $("upGoneDel").checked;
+  if (!withCode.length && !delGone){ toast("Nothing to upload."); return; }
+  $("busy").classList.remove("hidden");
+  try {
+    for (let i = 0; i < withCode.length; i += 500){
+      $("busyTxt").textContent = `Uploading… ${Math.min(i + 500, withCode.length)} / ${withCode.length}`;
+      const { error } = await sb.from("clients").upsert(withCode.slice(i, i+500), { onConflict: "client_code" }); if (error) throw error;
+    }
+    let deleted = 0;
+    if (delGone){
+      $("busyTxt").textContent = `Deleting ${gone.length} clients…`;
+      const ids = gone.map(c => c.id);
+      for (let i = 0; i < ids.length; i += 200){
+        const { error } = await sb.from("clients").delete().in("id", ids.slice(i, i+200)); if (error) throw error;
+      }
+      deleted = ids.length;
+      touches = touches.filter(t => !ids.includes(t.client_id));
+    }
+    clients = await fetchAll("clients", "id, client_code, name, pan, family_head, family_head_pan, rm_id, lead_advisory, mf_rm_name", { col: "name" });
+    await sb.from("upload_log").insert({ by_user: me.id, file_name: file.name, rows_in_excel: rows.length, uploaded: withCode.length, skipped: noCode + noName, no_rm: noRm });
+    showLastUpload();
+    $("busy").classList.add("hidden");
+    render();
+    alert(`Upload complete\n\n${withCode.length} clients updated or added\n${deleted} deleted\n${noCode + noName} skipped (no client code / name)\n${noRm} without RM\n\nApp now has ${clients.length} clients.`);
+  } catch (err){ $("busy").classList.add("hidden"); alert("Upload failed: " + err.message); }
+};
+
+/* ===== REVIEW SAVE ===== */
+$("rvSave").onclick = async () => {
+  const client = clients.find(c => c.id === openClientId); if (!client) return;
+  $("rvErr").textContent = "";
+  const status = $("rvStatus").value, qs = filter.qtr.start;
+  const existing = reviews.find(r => r.client_id === client.id && r.quarter_start === qs);
+  $("rvSave").disabled = true;
+  try {
+    if (!status){ $("rvErr").textContent = "Select a status."; $("rvSave").disabled = false; return; }
+    if (status === "none"){
+      const targets = [client.id, ...[...document.querySelectorAll("#rvFamList input:checked:not(.selall)")].map(i => i.value)];
+      const ids = reviews.filter(r => targets.includes(r.client_id) && r.quarter_start === qs).map(r => r.id);
+      if (ids.length){ const { error } = await sb.from("reviews").delete().in("id", ids); if (error) throw error; reviews = reviews.filter(r => !ids.includes(r.id)); }
+      for (const cid of targets){ const lg = await sb.from("review_log").insert({ client_id: cid, rm_id: me.id, quarter_start: qs, status: "none", note: $("rvNote").value.trim() || null }).select().single(); if (!lg.error) reviewLog.unshift(lg.data); }
+    } else {
+      const rec = { client_id: client.id, rm_id: profile.role === "manager" ? ($("fAs").value || me.id) : me.id, quarter_start: qs, status,
+        sent_date: $("rvDate").value || (existing && existing.sent_date) || (status === "sent" ? today() : null),
+        note: $("rvNote").value.trim() || null, updated_at: new Date().toISOString() };
+      const targets = [client.id, ...[...document.querySelectorAll("#rvFamList input:checked:not(.selall)")].map(i => i.value)];
+      for (const cid of targets){
+        const m = clients.find(x => x.id === cid); if (!m) continue;
+        const r2 = { ...rec, client_id: cid, rm_id: profile.role === "manager" ? ($("fAs").value === me.id ? me.id : (m.rm_id || me.id)) : me.id };
+        const { data, error } = await sb.from("reviews").upsert(r2, { onConflict: "client_id,quarter_start" }).select().single(); if (error) throw error;
+        reviews = reviews.filter(r => r.id !== data.id); reviews.push(data);
+        const lg = await sb.from("review_log").insert({ client_id: cid, rm_id: r2.rm_id, quarter_start: qs, status, sent_date: r2.sent_date, note: r2.note }).select().single();
+        if (!lg.error) reviewLog.unshift(lg.data);
+      }
+    }
+    closeDrawer(); renderKeep(client.id); toast("Review saved ✓");
+  } catch (e){ $("rvErr").textContent = "Could not save: " + e.message; }
+  $("rvSave").disabled = false;
+};
+
+$("fBoth").onclick = async () => {
+  const cid = openClientId; if (!cid) return;
+  const before = touches.length;
+  await $("fSave").onclick();
+  if (touches.length === before && !editingId){ return; }      // touch save failed — drawer still open with error
+  openClientId = cid;
+  await $("rvSave").onclick();
+  toast("Touch + review saved ✓");
+};
+
+/* ===== REPORTS ===== */
+let repRows = [];
+function buildReport(kind){
+  const all = enrich();
+  const keyOf = c => kind === "lead" ? (c.lead_advisory || "— no lead advisory —") : c.rmName;
+  const groups = {};
+  all.forEach(c => (groups[keyOf(c)] ||= []).push(c));
+  const line = (name, list) => {
+    const n = list.length, pc = x => n ? Math.round(x / n * 1000) / 10 : 0;
+    const cnt = (f, v) => list.filter(c => c[f] === v).length;
+    const tAll = list.filter(c => c.ts !== "none").length, rAll = list.filter(c => c.rs !== "none").length;
+    return { [kind === "lead" ? "Lead advisory" : "RM"]: name, Clients: n, "All touch": tAll, "Efficiency %": pc(tAll),
+      "Touch done %": pc(cnt("ts","declined") + cnt("ts","interested") + cnt("ts","executed")), "Touch productive %": pc(cnt("ts","executed")),
+      "All review": rAll, "Review efficiency %": pc(rAll), "Review done %": pc(cnt("rs","declined") + cnt("rs","interested") + cnt("rs","executed")), "Review productive %": pc(cnt("rs","executed")) };
+  };
+  repRows = Object.keys(groups).sort().map(k => line(k, groups[k]));
+  repRows.push(line("TOTAL", all));
+  const cols = Object.keys(repRows[0]);
+  $("repTable").innerHTML = `<thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>` +
+    repRows.map(r => `<tr${r[cols[0]] === "TOTAL" ? ' style="font-weight:600;background:#f0f2ef"' : ""}>${cols.map(c => `<td>${esc(String(r[c]))}${typeof r[c] === "number" && c.endsWith("%") ? "%" : ""}</td>`).join("")}</tr>`).join("") + "</tbody>";
+  $("repQ").textContent = filter.qtr.label;
+}
+$("reportsBtn").onclick = () => { buildReport($("repSel").value); $("repModal").classList.remove("hidden"); };
+$("repSel").onchange = () => buildReport($("repSel").value);
+$("repClose").onclick = () => $("repModal").classList.add("hidden");
+function reportData(kind){
+  const all = enrich();
+  const keyOf = c => kind === "lead" ? (c.lead_advisory || "— no lead advisory —") : c.rmName;
+  const groups = {}; all.forEach(c => (groups[keyOf(c)] ||= []).push(c));
+  const line = (name, list) => {
+    const n = list.length, pc = x => n ? Math.round(x / n * 1000) / 10 : 0;
+    const cnt = (f, v) => list.filter(c => c[f] === v).length;
+    const tAll = list.filter(c => c.ts !== "none").length, rAll = list.filter(c => c.rs !== "none").length;
+    return [name, n, tAll, pc(tAll), pc(cnt("ts","declined") + cnt("ts","interested") + cnt("ts","executed")), pc(cnt("ts","executed")),
+      rAll, pc(rAll), pc(cnt("rs","declined") + cnt("rs","interested") + cnt("rs","executed")), pc(cnt("rs","executed"))];
+  };
+  const rows = Object.keys(groups).sort().map(k => line(k, groups[k]));
+  rows.push(line("TOTAL", all));
+  return rows;
+}
+$("repPdf").onclick = () => {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const G = [29, 92, 58], W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  const q = filter.qtr.label, gen = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  // header band
+  doc.setFillColor(...G); doc.rect(0, 0, W, 26, "F");
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.text("GHC Touch Tracker", 14, 12);
+  doc.setFontSize(11); doc.setFont("helvetica", "normal"); doc.text("Management Report  ·  " + q, 14, 20);
+  doc.setFontSize(9); doc.text("Generated " + gen, W - 14, 20, { align: "right" });
+  // summary tiles
+  const tot = reportData("rm").pop();
+  const tiles = [["Clients", tot[1]], ["All touch", tot[2]], ["Touch efficiency", tot[3] + "%"], ["Touch done", tot[4] + "%"], ["Touch productive", tot[5] + "%"], ["All review", tot[6]], ["Review efficiency", tot[7] + "%"], ["Review done", tot[8] + "%"], ["Review productive", tot[9] + "%"]];
+  const tw = (W - 28 - 8 * 4) / 9; let x = 14, y = 32;
+  tiles.forEach(([l, v]) => {
+    doc.setFillColor(247, 248, 246); doc.setDrawColor(217, 222, 217); doc.roundedRect(x, y, tw, 18, 2, 2, "FD");
+    doc.setTextColor(...G); doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text(String(v), x + 4, y + 9);
+    doc.setTextColor(107, 115, 110); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.text(l, x + 4, y + 15);
+    x += tw + 4;
+  });
+  const head = [["", "Clients", "All touch", "Efficiency %", "Touch done %", "Touch prod. %", "All review", "Review eff. %", "Review done %", "Review prod. %"]];
+  const shade = (data) => {
+    if (data.section === "body" && [3,4,5,7,8,9].includes(data.column.index) && data.row.raw[0] !== "TOTAL"){
+      const v = +data.cell.raw; const c = v >= 60 ? [223, 239, 228] : v >= 30 ? [253, 243, 224] : [251, 236, 236];
+      data.cell.styles.fillColor = c;
+    }
+    if (data.section === "body" && data.row.raw[0] === "TOTAL"){ data.cell.styles.fontStyle = "bold"; data.cell.styles.fillColor = [240, 242, 239]; }
+  };
+  const table = (title, kind, startY) => {
+    doc.setTextColor(27, 31, 28); doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text(title, 14, startY);
+    doc.autoTable({ startY: startY + 3, head, body: reportData(kind).map(r => r.map((v, i) => i >= 3 && typeof v === "number" ? v + "%" : v)),
+      theme: "grid", styles: { fontSize: 8.5, cellPadding: 2, lineColor: [217, 222, 217] }, headStyles: { fillColor: G, textColor: 255, fontStyle: "bold" },
+      columnStyles: { 0: { cellWidth: 60, fontStyle: "bold" } }, margin: { left: 14, right: 14 },
+      didParseCell: d => { if (d.section === "body"){ d.cell.raw = String(d.cell.raw).replace("%", ""); } shade(d); } });
+    return doc.lastAutoTable.finalY;
+  };
+  head[0][0] = "Lead advisory";
+  let yEnd = table("1. Lead advisory efficiency", "lead", 58);
+  head[0][0] = "RM";
+  if (yEnd > H - 60){ doc.addPage(); yEnd = 10; }
+  table("2. RM-wise efficiency", "rm", yEnd + 12);
+  // footer on every page
+  const pages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pages; i++){
+    doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(140, 146, 142);
+    doc.text("Efficiency = All touch ÷ Clients  ·  Done % = (Declined + Interested + Executed) ÷ Clients  ·  Productive % = Executed ÷ Clients  ·  Review columns use the same logic on written reviews", 14, H - 6);
+    doc.text(`Page ${i} / ${pages}`, W - 14, H - 6, { align: "right" });
+  }
+  doc.save(`GHC_management_report_${today()}.pdf`);
+};
+$("repXls").onclick = () => {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), $("repSel").value === "lead" ? "Lead advisory" : "RM wise");
+  XLSX.writeFile(wb, `GHC_report_${$("repSel").value}_${today()}.xlsx`);
+};
+
+/* ===== PASSWORD (self) ===== */
+$("pwBtn").onclick = async () => {
+  const p1 = prompt("New password (min 6 characters):"); if (p1 === null) return;
+  if (p1.length < 6){ toast("Too short — at least 6 characters"); return; }
+  const p2 = prompt("Type it again:"); if (p2 !== p1){ toast("Passwords don't match"); return; }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  toast(error ? "Could not change: " + error.message : "Password changed ✓", 4000);
+};
+
+/* ===== MANAGER: USERS ===== */
+async function adminCall(body){
+  const { data, error } = await sb.functions.invoke("admin-users", { body });
+  if (error) throw new Error(error.message || "function error");
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+async function reloadProfiles(){ profiles = await fetchAll("profiles", "id, full_name, role, email"); renderUsers(); render(); }
+function renderUsers(){
+  $("usersRows").innerHTML = profiles.slice().sort((a,b) => a.full_name.localeCompare(b.full_name)).map(p => `<tr>
+    <td>${esc(p.full_name)}</td><td>${esc(p.email || "")}</td><td>${({ admin: "Super admin", manager: "Sub admin", rm: "RM" })[p.role] || p.role}</td>
+    <td style="white-space:nowrap"><button class="btn ghost small" data-u="pw" data-id="${p.id}">Reset password</button>
+    <button class="btn ghost small" data-u="edit" data-id="${p.id}">Edit</button>
+    ${p.id === me.id ? "" : `<button class="btn ghost small" data-u="del" data-id="${p.id}" style="color:var(--warn);border-color:var(--warn)">Remove</button>`}</td></tr>`).join("");
+  document.querySelectorAll("[data-u]").forEach(b => b.onclick = async () => {
+    const p = profiles.find(x => x.id === b.dataset.id); if (!p) return;
+    try {
+      if (b.dataset.u === "pw"){
+        const np = prompt(`New password for ${p.full_name} (min 6):`); if (!np) return; if (np.length < 6){ toast("Too short"); return; }
+        await adminCall({ action: "password", id: p.id, password: np }); toast(`Password set for ${p.full_name} ✓`);
+      }
+      if (b.dataset.u === "edit"){
+        const name = prompt("Full name:", p.full_name); if (name === null) return;
+        const role = prompt("Role — type rm, manager (sub admin) or admin (super admin):", p.role); if (role === null) return;
+        if (!["rm","manager","admin"].includes(role)){ toast("Role must be rm, manager or admin"); return; }
+        await adminCall({ action: "update", id: p.id, full_name: name.trim(), role }); await reloadProfiles(); toast("Updated ✓");
+      }
+      if (b.dataset.u === "del"){
+        if (!confirm(`Remove ${p.full_name}? Their clients become unassigned (re-upload Excel to reassign). Their notes are kept.`)) return;
+        await adminCall({ action: "delete", id: p.id }); await reloadProfiles(); toast("User removed");
+      }
+    } catch (e){ alert("Failed: " + e.message + "\n\nIf this says the function is missing, deploy the admin-users Edge Function in Supabase first."); }
+  });
+}
+$("usersBtn").onclick = () => { renderUsers(); $("usersModal").classList.remove("hidden"); };
+$("usersClose").onclick = () => $("usersModal").classList.add("hidden");
+$("nuAdd").onclick = async () => {
+  $("nuErr").textContent = "";
+  const full_name = $("nuName").value.trim(), email = $("nuEmail").value.trim().toLowerCase(), role = $("nuRole").value, password = $("nuPass").value;
+  if (!full_name || !email || password.length < 6){ $("nuErr").textContent = "Name, email and a password of 6+ characters are required."; return; }
+  $("nuAdd").disabled = true;
+  try { await adminCall({ action: "create", full_name, email, role, password }); await reloadProfiles(); $("nuName").value = $("nuEmail").value = $("nuPass").value = ""; toast(`${full_name} added ✓`); }
+  catch (e){ $("nuErr").textContent = e.message; }
+  $("nuAdd").disabled = false;
+};
+
+/* ===== MANAGER: RESTORE ===== */
+$("restoreBtn").onclick = () => $("restoreFile").click();
+$("restoreFile").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return; e.target.value = "";
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const sh = n => wb.Sheets[n] ? XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: null }) : null;
+  const rc = sh("_clients"), rt = sh("_touches"), rr = sh("_reviews"), rp = sh("_profiles");
+  if (!rc || !rt || !rr){ alert("This is not a backup file made by the Backup button (raw sheets missing)."); return; }
+  if (!confirm(`Restore from ${file.name}?\n\nThis will REPLACE everything in the app with:\n${rc.length} clients · ${rt.length} touches · ${rr.length} reviews\n\nCurrent data will be removed first.`)) return;
+  if (prompt("Type RESTORE to confirm:") !== "RESTORE"){ toast("Cancelled"); return; }
+  // map old profile ids -> current ids by email
+  const byEmail = Object.fromEntries(profiles.filter(p => p.email).map(p => [p.email.toLowerCase(), p.id]));
+  const idMap = {}; (rp || []).forEach(p => { const cur = byEmail[(p.email || "").toLowerCase()]; if (cur) idMap[p.id] = cur; });
+  const curIds = new Set(profiles.map(p => p.id));
+  const mapRm = id => (id && curIds.has(id)) ? id : (idMap[id] || null);
+  const clean = (o, keys) => Object.fromEntries(keys.map(k => [k, o[k] === undefined || o[k] === "" ? null : o[k]]));
+  $("busy").classList.remove("hidden");
+  try {
+    $("busyTxt").textContent = "Clearing current data…";
+    for (const t of ["touches","reviews","clients"]){ const r = await sb.from(t).delete().gte("created_at", "1900-01-01"); if (r.error && t !== "reviews") throw r.error; }
+    await sb.from("reviews").delete().gte("updated_at", "1900-01-01");
+    const cRows = rc.map(c => ({ ...clean(c, ["id","client_code","name","pan","family_head","family_head_pan","lead_advisory","mf_rm_name","created_at"]), rm_id: mapRm(c.rm_id) }));
+    for (let i = 0; i < cRows.length; i += 500){ $("busyTxt").textContent = `Restoring clients ${Math.min(i+500, cRows.length)} / ${cRows.length}`; const { error } = await sb.from("clients").insert(cRows.slice(i, i+500)); if (error) throw error; }
+    const tRows = rt.map(t => ({ ...clean(t, ["id","client_id","touch_date","mode","status","touch_type","note","expected_date","created_at","edited_at"]), rm_id: mapRm(t.rm_id) || me.id }));
+    for (let i = 0; i < tRows.length; i += 500){ $("busyTxt").textContent = `Restoring touches ${Math.min(i+500, tRows.length)} / ${tRows.length}`; const { error } = await sb.from("touches").insert(tRows.slice(i, i+500)); if (error) throw error; }
+    const rRows = rr.map(r => ({ ...clean(r, ["id","client_id","quarter_start","status","sent_date","note","updated_at"]), rm_id: mapRm(r.rm_id) || me.id }));
+    for (let i = 0; i < rRows.length; i += 500){ $("busyTxt").textContent = `Restoring reviews ${Math.min(i+500, rRows.length)} / ${rRows.length}`; const { error } = await sb.from("reviews").insert(rRows.slice(i, i+500)); if (error) throw error; }
+    const rl = sh("_review_log") || [];
+    const lRows = rl.map(r => ({ ...clean(r, ["id","client_id","quarter_start","status","sent_date","note","logged_at"]), rm_id: mapRm(r.rm_id) || me.id }));
+    for (let i = 0; i < lRows.length; i += 500){ const { error } = await sb.from("review_log").insert(lRows.slice(i, i+500)); if (error) throw error; }
+    const tl = sh("_touch_log") || [];
+    const tlRows = tl.map(r => ({ ...clean(r, ["id","touch_id","client_id","touch_date","mode","status","touch_type","note","expected_date","logged_at"]), rm_id: mapRm(r.rm_id) || me.id }));
+    for (let i = 0; i < tlRows.length; i += 500){ const { error } = await sb.from("touch_log").insert(tlRows.slice(i, i+500)); if (error) throw error; }
+    $("busy").classList.add("hidden");
+    alert(`Restore complete\n\n${cRows.length} clients · ${tRows.length} touches · ${rRows.length} reviews`);
+    location.reload();
+  } catch (err){ $("busy").classList.add("hidden"); alert("Restore failed: " + err.message + "\n\nNothing else was changed — you can retry."); }
+};
+
+/* ===== MANAGER: CLEAR ALL ===== */
+$("clearBtn").onclick = async () => {
+  if (!confirm(`Are you sure? This will remove ALL ${clients.length} clients and ALL ${touches.length} touches for every RM.`)) return;
+  const typed = prompt(`Final confirmation. This removes ALL ${clients.length} clients AND ALL ${touches.length} touches. It cannot be undone.\n\nExport first if you need a backup.\n\nType DELETE to continue:`);
+  if (typed !== "DELETE"){ if (typed !== null) toast("Cancelled — you must type DELETE exactly."); return; }
+  $("clearBtn").disabled = true;
+  try {
+    let r = await sb.from("touches").delete().gte("created_at", "1900-01-01"); if (r.error) throw r.error;
+    r = await sb.from("clients").delete().gte("created_at", "1900-01-01"); if (r.error) throw r.error;
+    clients = []; touches = []; filter.rm = "all"; $("rmSel").value = "all";
+    toast("All clients and touches removed"); render();
+  } catch (e){ alert("Clear failed: " + e.message); }
+  $("clearBtn").disabled = false;
+};
+
+/* ===== MANAGER: EXPORT ===== */
+$("exportBtn").onclick = () => {
+  const cmap = Object.fromEntries(clients.map(c => [c.id, c]));
+  const pmap = Object.fromEntries(profiles.map(p => [p.id, p.full_name]));
+  const tRows = touches.map(t => { const c = cmap[t.client_id] || {}; return {
+    Date: t.touch_date, RM: pmap[t.rm_id] || "", Client: c.name || "", PAN: c.pan || "", "Family head": c.family_head || "", "Family head PAN": c.family_head_pan || "",
+    "Client code": c.client_code || "", Type: t.touch_type, Mode: t.mode, Status: t.status, "Expected sale": t.expected_date || "", Note: t.note || "", "Logged at": t.created_at }; });
+  const cRows = enrich().map(c => ({ Client: c.name, PAN: c.pan || "", "Family head": c.family_head || "", "Family head PAN": c.family_head_pan || "", "Client code": c.client_code || "",
+    RM: c.rmName, "RM email": c.rmEmail, "MF RM (Zoho)": c.mf_rm_name || "", "Lead advisory": c.lead_advisory || "", "Last touch": c.last?.touch_date || "", "Latest status": c.last?.status || "not touched", "Expected sale": c.expected || "", "Last note": c.last?.note || "" }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tRows), "Touches");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cRows), "Clients");
+  const rRows = reviews.map(r => { const c = cmap[r.client_id] || {}; return { Quarter: r.quarter_start, RM: pmap[r.rm_id] || "", Client: c.name || "", PAN: c.pan || "", Status: r.status, "Sent on": r.sent_date || "", Note: r.note || "", "Updated at": r.updated_at }; });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rRows), "Reviews");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clients), "_clients");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(touches), "_touches");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reviews), "_reviews");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reviewLog), "_review_log");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(touchLog), "_touch_log");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(profiles.map(p => ({ id: p.id, full_name: p.full_name, email: p.email || "", role: p.role }))), "_profiles");
+  XLSX.writeFile(wb, `GHC_backup_${today()}.xlsx`);
+};
+</script>
+</body>
+</html>
