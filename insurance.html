@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Insurance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="band">
+      <div class="grp"><div class="rvhead">Renewals</div><div class="stats" id="stats"></div></div>
+      <div class="grp"><div class="rvhead">Premium collected — this month</div><div class="stats" id="pstats"></div></div>
+    </div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search name, phone, email, PAN, policy no">
+      <select id="fType" style="width:auto"><option value="">All types</option></select>
+      <select id="fKind" style="width:auto"><option value="">Fresh + renewal</option><option value="fresh">Fresh</option><option value="renewal">Renewal</option></select>
+      <button class="btn ghost small" id="clearF">Clear ×</button>
+      <button class="btn small" id="newBtn">+ New policy</button>
+      <span class="tools"><button class="btn ghost small" id="repBtn">Premium report</button>
+      <button class="btn ghost small hidden" id="typesBtn">Types</button>
+      <button class="btn ghost small hidden" id="filesBtn">All files</button></span>
+    </div>
+
+    <div class="pager" id="pagerTop"></div>
+    <div class="tablewrap">
+      <table id="tbl"><thead><tr>
+        <th class="sort" data-k="client">Client</th><th class="sort" data-k="type">Type</th><th class="sort" data-k="policy">Policy no</th><th>Plan</th>
+        <th class="sort" data-k="kind">Fresh / Renewal</th><th class="sort" data-k="valid">Valid to</th><th class="sort" data-k="due">Next due</th>
+        <th class="sort" data-k="amt">Premium</th><th class="side">RM</th>
+      </tr></thead><tbody id="rows"></tbody></table>
+      <div class="empty hidden" id="empty">No policies yet.</div>
+    </div>
+    <div class="pager" id="pagerBot"></div>
+  </main>
+</div>
+
+<!-- POLICY DRAWER -->
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle">New policy</h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody">
+    <h3>Client</h3>
+    <div class="grid2">
+      <div><label>PAN</label><input id="cPan" placeholder="type PAN — auto-fills if known" style="text-transform:uppercase"></div>
+      <div><label>Name</label><input id="cName"></div>
+      <div><label>Phone</label><input id="cPhone"></div>
+      <div><label>Email</label><input id="cEmail" type="email"></div>
+    </div>
+    <h3 style="margin-top:18px">Policy</h3>
+    <div class="grid2">
+      <div><label>Insurance type</label><select id="pType"></select></div>
+      <div><label>Policy no</label><input id="pNo"></div>
+      <div><label>Fresh / Renewal</label><select id="pKind"><option value="fresh">Fresh</option><option value="renewal">Renewal</option></select></div>
+      <div><label>Plan name</label><input id="pPlan"></div>
+      <div><label>Basic sum assured</label><input id="pSum" type="number" min="0"></div>
+      <div><label>Existing bonus</label><input id="pExBonus" type="number" min="0"></div>
+      <div><label>Bonus</label><input id="pBonus" type="number" min="0"></div>
+      <div></div>
+      <div><label>Valid from</label><input id="pFrom" type="date"></div>
+      <div><label>Valid to</label><input id="pTo" type="date"></div>
+    </div>
+    <h3 style="margin-top:18px">Collection</h3>
+    <div class="grid2">
+      <div><label>Collection date</label><input id="pColDate" type="date"></div>
+      <div><label>Collection amount</label><input id="pColAmt" type="number" min="0"></div>
+      <div><label>Next due date</label><input id="pDue" type="date"></div>
+      <div><label>RM</label><select id="pRm"><option value="">— none —</option></select></div>
+    </div>
+    <label class="toggle" style="margin-top:10px"><input type="checkbox" id="pService"> Service only (no sale)</label>
+    <h3 style="margin-top:18px">Nominees <button class="btn ghost small" id="nomAdd" style="margin-left:8px">+ Add</button></h3>
+    <div id="nomList"></div>
+    <label>Narration</label>
+    <textarea id="pNote" rows="3"></textarea>
+    <label>Upload policy document (PDF / image)</label>
+    <input type="file" id="pFile" accept=".pdf,.jpg,.jpeg,.png">
+    <div class="err" id="pErr"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+      <button class="btn" id="pSave">Save policy</button>
+      <button id="fCancel" class="hidden">Cancel</button>
+    </div>
+
+    <div id="detail" class="hidden">
+      <h3 style="margin-top:26px">Documents <span id="docNote" style="font-weight:400;color:var(--muted)"></span></h3>
+      <ul class="files" id="docList"></ul>
+      <h3 style="margin-top:22px">Policy history (same policy no)</h3>
+      <ul class="hist" id="pHist"></ul>
+    </div>
+  </div>
+</aside>
+
+<!-- REPORT -->
+<div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:820px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0">Premium report</h2>
+      <input type="date" id="rFrom" style="width:auto"> <span>to</span> <input type="date" id="rTo" style="width:auto">
+      <button class="btn small" id="rRun">Run</button><button class="btn ghost small" id="rXls">Export</button><button class="x" id="rClose">×</button></div>
+    <div class="fml" style="margin:8px 0">Premium = collection amount, by collection date</div>
+    <div class="tablewrap"><table id="rTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<!-- TYPES -->
+<div id="typesModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:420px">
+    <div style="display:flex;align-items:center"><h2 style="margin:0">Insurance types</h2><button class="x" id="tClose">×</button></div>
+    <ul id="tList" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="tNew" placeholder="New type, e.g. Motor"><button class="btn small" id="tAdd">Add</button></div>
+  </div>
+</div>
+
+<!-- ALL FILES -->
+<div id="filesModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:820px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">All policy documents</h2><input id="fSearch" placeholder="filter by client / PAN" style="width:auto"><button class="x" id="fClose">×</button></div>
+    <div id="fTree" style="margin-top:12px;font-size:13px"></div>
+  </div>
+</div>
+
+<div id="busy" class="hidden"><div class="sp"></div><div id="busyTxt">Working…</div></div>
+
+<script>
+let ctx, types = [], iclients = [], policies = [], nominees = [], files = [], touchClients = [];
+let filter = { q: "", type: "", kind: "", stat: "all", sort: "due", dir: 1 }, page = 1, pageSize = 100, editingId = null, openId = null;
+const canEdit = () => ctx.level === "edit";
+
+(async () => {
+  ctx = await requireAuth("insurance"); if (!ctx) return;
+  shellHeader("Insurance", ctx);
+  await load();
+  $("app").classList.remove("hidden");
+  if (ctx.isMgr){ $("typesBtn").classList.remove("hidden"); $("filesBtn").classList.remove("hidden"); }
+  if (!canEdit()){ $("newBtn").classList.add("hidden"); }
+  render();
+})();
+
+async function load(){
+  types = await fetchAll("ins_types", "id, name, active", { col: "name" });
+  iclients = await fetchAll("ins_clients", "id, pan, name, phone, email, client_id");
+  policies = await fetchAll("policies", "*", { col: "created_at", asc: false });
+  nominees = await fetchAll("policy_nominees", "id, policy_id, name, relation, share");
+  files = await fetchAll("policy_files", "id, ins_client_id, policy_id, path, file_name, uploaded_at", { col: "uploaded_at", asc: false });
+  try { touchClients = await fetchAll("clients", "id, name, pan, client_code"); } catch (e){ touchClients = []; }
+  $("fType").innerHTML = `<option value="">All types</option>` + types.filter(t => t.active).map(t => `<option>${esc(t.name)}</option>`).join("");
+  $("pType").innerHTML = types.filter(t => t.active).map(t => `<option>${esc(t.name)}</option>`).join("");
+  $("pRm").innerHTML = `<option value="">— none —</option>` + ctx.profiles.slice().sort((a,b) => a.full_name.localeCompare(b.full_name)).map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
+}
+
+/* ===== derived ===== */
+function enrich(){
+  const cmap = Object.fromEntries(iclients.map(c => [c.id, c])), pmap = Object.fromEntries(ctx.profiles.map(p => [p.id, p.full_name]));
+  const t = today(), d7 = addDays(t, 7), d30 = addDays(t, 30);
+  return policies.map(p => { const c = cmap[p.ins_client_id] || {}; return { ...p, client: c, rmName: pmap[p.rm_id] || "",
+    due7: p.next_due && p.next_due >= t && p.next_due <= d7, due30: p.next_due && p.next_due >= t && p.next_due <= d30,
+    overdue: p.next_due && p.next_due < t }; });
+}
+function render(){
+  let all = enrich();
+  const t = today(), m0 = t.slice(0,7);
+  const tile = (k, l, v, cls = "") => `<div class="stat ${cls} ${filter.stat===k?"active":""}" data-k="${k}"><b>${v}</b><span>${l}</span></div>`;
+  $("stats").innerHTML = tile("all","Total policies",all.length) + tile("due7","Due in 7 days",all.filter(p => p.due7).length,"red") + tile("due30","Due in 30 days",all.filter(p => p.due30).length,"amb") + tile("overdue","Overdue",all.filter(p => p.overdue).length,"mag") + tile("service","Service only",all.filter(p => p.service_only).length);
+  const mon = all.filter(p => (p.collection_date || "").startsWith(m0));
+  const sum = a => a.reduce((s, p) => s + (+p.collection_amt || 0), 0);
+  $("pstats").innerHTML = tile("month","All",inr(sum(mon)),"pct") + tile("monthFresh","Fresh",inr(sum(mon.filter(p => p.kind === "fresh"))),"grn") + tile("monthRen","Renewal",inr(sum(mon.filter(p => p.kind === "renewal"))),"grn") + tile("monthCount","Policies",mon.length);
+  document.querySelectorAll(".stat").forEach(el => el.onclick = () => { filter.stat = filter.stat === el.dataset.k ? "all" : el.dataset.k; page = 1; render(); });
+
+  let rows = all;
+  if (filter.stat === "due7") rows = rows.filter(p => p.due7);
+  if (filter.stat === "due30") rows = rows.filter(p => p.due30);
+  if (filter.stat === "overdue") rows = rows.filter(p => p.overdue);
+  if (filter.stat === "service") rows = rows.filter(p => p.service_only);
+  if (filter.stat.startsWith("month")) rows = rows.filter(p => (p.collection_date || "").startsWith(m0) && (filter.stat === "monthFresh" ? p.kind === "fresh" : filter.stat === "monthRen" ? p.kind === "renewal" : true));
+  if (filter.type) rows = rows.filter(p => p.type === filter.type);
+  if (filter.kind) rows = rows.filter(p => p.kind === filter.kind);
+  const q = filter.q.toLowerCase();
+  if (q) rows = rows.filter(p => [p.client.name, p.client.phone, p.client.email, p.client.pan, p.policy_no, p.plan_name].some(v => (v || "").toLowerCase().includes(q)));
+  const key = p => ({ client: (p.client.name || "").toLowerCase(), type: p.type, policy: p.policy_no, kind: p.kind, valid: p.valid_to || null, due: p.next_due || null, amt: +p.collection_amt || 0 })[filter.sort];
+  rows = rows.slice().sort((a,b) => { const ka = key(a), kb = key(b); if (ka == null && kb == null) return 0; if (ka == null) return 1; if (kb == null) return -1; return ka < kb ? -filter.dir : ka > kb ? filter.dir : 0; });
+  document.querySelectorAll("th.sort").forEach(th => { th.classList.toggle("on", th.dataset.k === filter.sort); th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === filter.sort ? (filter.dir === 1 ? " ▲" : " ▼") : ""); th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); }; });
+
+  const total = rows.length, pages = Math.max(1, Math.ceil(total / pageSize)); if (page > pages) page = pages;
+  const from = (page - 1) * pageSize, to = Math.min(total, from + pageSize);
+  const pg = `<span>${total ? from + 1 : 0}–${to} of ${total}</span><button class="btn ghost small" data-pg="prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button><span>Page ${page} / ${pages}</span><button class="btn ghost small" data-pg="next" ${page >= pages ? "disabled" : ""}>Next ›</button>`;
+  $("pagerTop").innerHTML = pg; $("pagerBot").innerHTML = pg;
+  document.querySelectorAll("[data-pg=prev]").forEach(b => b.onclick = () => { page--; render(); }); document.querySelectorAll("[data-pg=next]").forEach(b => b.onclick = () => { page++; render(); });
+  rows = rows.slice(from, to);
+  $("rows").innerHTML = rows.map(p => `<tr class="row" data-id="${p.id}">
+    <td><div>${esc(p.client.name || "")}</div><div style="font-size:12px;color:var(--muted)">${esc(p.client.pan || "")} · ${esc(p.client.phone || "")}</div></td>
+    <td>${esc(p.type)}</td><td>${esc(p.policy_no)}</td><td>${esc(p.plan_name || "")}</td>
+    <td><span class="pill ${p.kind === "fresh" ? "done" : "talk"}">${p.kind}</span>${p.service_only ? ' <span class="pill cold">service</span>' : ""}</td>
+    <td>${fmtY(p.valid_to)}</td>
+    <td><span class="pill ${p.overdue ? "mag" : p.due7 ? "red" : p.due30 ? "hot" : "talk"}">${fmtY(p.next_due)}</span></td>
+    <td>${inr(p.collection_amt)}</td><td class="side">${esc(p.rmName)}</td></tr>`).join("");
+  $("empty").classList.toggle("hidden", rows.length > 0);
+  document.querySelectorAll("tr.row").forEach(el => el.onclick = () => openPolicy(el.dataset.id));
+}
+$("q").oninput = e => { filter.q = e.target.value; page = 1; render(); };
+$("fType").onchange = e => { filter.type = e.target.value; page = 1; render(); };
+$("fKind").onchange = e => { filter.kind = e.target.value; page = 1; render(); };
+$("clearF").onclick = () => { filter = { ...filter, q: "", type: "", kind: "", stat: "all" }; $("q").value = ""; $("fType").value = ""; $("fKind").value = ""; page = 1; render(); };
+
+/* ===== drawer ===== */
+function nomRow(n = {}){ const d = document.createElement("div"); d.className = "nomrow";
+  d.innerHTML = `<input placeholder="Nominee name" value="${esc(n.name || "")}"><input placeholder="Relation" value="${esc(n.relation || "")}"><input type="number" placeholder="%" value="${n.share ?? ""}"><button title="remove">×</button>`;
+  d.querySelector("button").onclick = () => d.remove(); $("nomList").appendChild(d); }
+$("nomAdd").onclick = () => nomRow();
+function fillForm(p, c){
+  $("cPan").value = c?.pan || ""; $("cName").value = c?.name || ""; $("cPhone").value = c?.phone || ""; $("cEmail").value = c?.email || "";
+  $("pType").value = p?.type || (types.find(t => t.active) || {}).name || ""; $("pNo").value = p?.policy_no || ""; $("pKind").value = p?.kind || "fresh"; $("pPlan").value = p?.plan_name || "";
+  $("pSum").value = p?.sum_assured ?? ""; $("pExBonus").value = p?.existing_bonus ?? ""; $("pBonus").value = p?.bonus ?? "";
+  $("pFrom").value = p?.valid_from || ""; $("pTo").value = p?.valid_to || ""; $("pColDate").value = p?.collection_date || today(); $("pColAmt").value = p?.collection_amt ?? ""; $("pDue").value = p?.next_due || "";
+  $("pRm").value = p?.rm_id || ""; $("pService").checked = !!p?.service_only; $("pNote").value = p?.narration || ""; $("pFile").value = ""; $("pErr").textContent = "";
+  $("nomList").innerHTML = ""; (p ? nominees.filter(n => n.policy_id === p.id) : []).forEach(nomRow);
+  document.querySelectorAll("#drawer input, #drawer select, #drawer textarea").forEach(i => i.disabled = !canEdit());
+  $("pSave").classList.toggle("hidden", !canEdit()); $("nomAdd").classList.toggle("hidden", !canEdit());
+}
+$("cPan").oninput = () => {
+  const pan = $("cPan").value.trim().toUpperCase(); if (pan.length < 10) return;
+  const ic = iclients.find(c => (c.pan || "").toUpperCase() === pan); const tc = touchClients.find(c => (c.pan || "").toUpperCase() === pan);
+  if (ic){ $("cName").value = ic.name || ""; $("cPhone").value = ic.phone || ""; $("cEmail").value = ic.email || ""; toast("Existing insurance client"); }
+  else if (tc){ $("cName").value = tc.name || ""; toast("Found in client list"); }
+};
+function openNew(){ editingId = null; openId = null; $("dTitle").textContent = "New policy"; $("dMeta").textContent = ""; fillForm(null, null); $("detail").classList.add("hidden"); $("fCancel").classList.add("hidden"); $("pSave").textContent = "Save policy"; show(); }
+$("newBtn").onclick = openNew;
+async function openPolicy(id){
+  const p = policies.find(x => x.id === id); if (!p) return; const c = iclients.find(x => x.id === p.ins_client_id);
+  openId = id; editingId = id; $("dTitle").textContent = `${c?.name || ""} · ${p.policy_no}`; $("dMeta").textContent = `${p.type} · ${p.kind} · ${p.plan_name || ""}`;
+  fillForm(p, c); $("pSave").textContent = "Update policy"; $("fCancel").classList.add("hidden"); $("detail").classList.remove("hidden");
+  const hist = policies.filter(x => x.policy_no === p.policy_no && x.ins_client_id === p.ins_client_id).sort((a,b) => (b.collection_date || "").localeCompare(a.collection_date || ""));
+  $("pHist").innerHTML = hist.map(x => `<li><div class="d">${fmtY(x.collection_date)} · <span class="pill ${x.kind === "fresh" ? "done" : "talk"}">${x.kind}</span> · ${inr(x.collection_amt)} · valid ${fmtY(x.valid_from)} → ${fmtY(x.valid_to)}</div><div class="n">${esc(x.narration || "")}</div></li>`).join("");
+  renderDocs(p.ins_client_id); show();
+}
+function renderDocs(cid){
+  const list = files.filter(f => f.ins_client_id === cid), shown = ctx.isMgr ? list : list.slice(0, 3);
+  $("docNote").textContent = ctx.isMgr ? `(${list.length})` : `(last 3 of ${list.length})`;
+  $("docList").innerHTML = shown.length ? shown.map(f => `<li><span>${esc(f.file_name)} <span style="color:var(--muted)">· ${new Date(f.uploaded_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span></span><a href="#" data-dl="${f.path}">Download</a></li>`).join("") : `<li style="color:var(--muted)">No documents.</li>`;
+  document.querySelectorAll("[data-dl]").forEach(a => a.onclick = async e => { e.preventDefault(); const { data, error } = await sb.storage.from("policies").createSignedUrl(a.dataset.dl, 300); if (error){ toast("Could not get file: " + error.message); return; } window.open(data.signedUrl, "_blank"); });
+}
+function show(){ $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0; }
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); openId = null; editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+
+$("pSave").onclick = async () => {
+  $("pErr").textContent = "";
+  const pan = $("cPan").value.trim().toUpperCase(), name = $("cName").value.trim(), pno = $("pNo").value.trim();
+  if (!name || !pno || !$("pType").value){ $("pErr").textContent = "Name, insurance type and policy no are required."; return; }
+  $("pSave").disabled = true;
+  try {
+    // client
+    let c = pan ? iclients.find(x => (x.pan || "").toUpperCase() === pan) : null;
+    const tc = pan ? touchClients.find(x => (x.pan || "").toUpperCase() === pan) : null;
+    const crec = { pan: pan || null, name, phone: $("cPhone").value.trim() || null, email: $("cEmail").value.trim() || null, client_id: tc ? tc.id : (c ? c.client_id : null) };
+    if (c){ const r = await sb.from("ins_clients").update(crec).eq("id", c.id).select().single(); if (r.error) throw r.error; c = r.data; iclients = iclients.map(x => x.id === c.id ? c : x); }
+    else { const r = await sb.from("ins_clients").insert(crec).select().single(); if (r.error) throw r.error; c = r.data; iclients.push(c); }
+    // policy
+    const num = id => $(id).value === "" ? null : +$(id).value;
+    const prec = { ins_client_id: c.id, type: $("pType").value, policy_no: pno, kind: $("pKind").value, plan_name: $("pPlan").value.trim() || null,
+      sum_assured: num("pSum"), existing_bonus: num("pExBonus"), bonus: num("pBonus"), valid_from: $("pFrom").value || null, valid_to: $("pTo").value || null,
+      collection_date: $("pColDate").value || null, collection_amt: num("pColAmt"), next_due: $("pDue").value || null, rm_id: $("pRm").value || null,
+      service_only: $("pService").checked, narration: $("pNote").value.trim() || null };
+    let p;
+    if (editingId){ const r = await sb.from("policies").update(prec).eq("id", editingId).select().single(); if (r.error) throw r.error; p = r.data; policies = policies.map(x => x.id === p.id ? p : x); await sb.from("policy_nominees").delete().eq("policy_id", p.id); nominees = nominees.filter(n => n.policy_id !== p.id); }
+    else { const r = await sb.from("policies").insert({ ...prec, created_by: ctx.me.id }).select().single(); if (r.error) throw r.error; p = r.data; policies.unshift(p); }
+    // nominees
+    const noms = [...document.querySelectorAll("#nomList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, share: i[2].value === "" ? null : +i[2].value }; }).filter(n => n.name);
+    if (noms.length){ const r = await sb.from("policy_nominees").insert(noms).select(); if (r.error) throw r.error; nominees.push(...r.data); }
+    // file
+    const f = $("pFile").files[0];
+    if (f){
+      $("busy").classList.remove("hidden"); $("busyTxt").textContent = "Uploading document…";
+      const safe = (pan || c.id).replace(/[^A-Za-z0-9]/g, ""), fname = `${pno.replace(/[^A-Za-z0-9]/g, "_")}_${today()}_${f.name.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+      const path = `${safe}/${fname}`;
+      const up = await sb.storage.from("policies").upload(path, f, { upsert: false }); if (up.error) throw up.error;
+      const r = await sb.from("policy_files").insert({ ins_client_id: c.id, policy_id: p.id, path, file_name: f.name, uploaded_by: ctx.me.id }).select().single(); if (r.error) throw r.error; files.unshift(r.data);
+      $("busy").classList.add("hidden");
+    }
+    closeDrawer(); render(); toast(editingId ? "Policy updated ✓" : "Policy saved ✓");
+  } catch (e){ $("busy").classList.add("hidden"); $("pErr").textContent = "Could not save: " + e.message; }
+  $("pSave").disabled = false;
+};
+
+/* ===== report ===== */
+let repRows = [];
+$("repBtn").onclick = () => { const t = today(); $("rFrom").value = t.slice(0,8) + "01"; $("rTo").value = t; runReport(); $("repModal").classList.remove("hidden"); };
+$("rClose").onclick = () => $("repModal").classList.add("hidden"); $("rRun").onclick = runReport;
+function runReport(){
+  const f = $("rFrom").value, t = $("rTo").value;
+  const sel = policies.filter(p => p.collection_date && p.collection_date >= f && p.collection_date <= t);
+  const tnames = [...new Set([...types.map(x => x.name), ...sel.map(p => p.type)])];
+  repRows = tnames.map(n => { const a = sel.filter(p => p.type === n); const s = k => a.filter(p => p.kind === k).reduce((x, p) => x + (+p.collection_amt || 0), 0);
+    return { Type: n, "Fresh policies": a.filter(p => p.kind === "fresh").length, "Fresh premium": s("fresh"), "Renewal policies": a.filter(p => p.kind === "renewal").length, "Renewal premium": s("renewal"), "Total premium": s("fresh") + s("renewal") }; });
+  repRows.push({ Type: "TOTAL", "Fresh policies": repRows.reduce((s,r) => s + r["Fresh policies"], 0), "Fresh premium": repRows.reduce((s,r) => s + r["Fresh premium"], 0), "Renewal policies": repRows.reduce((s,r) => s + r["Renewal policies"], 0), "Renewal premium": repRows.reduce((s,r) => s + r["Renewal premium"], 0), "Total premium": repRows.reduce((s,r) => s + r["Total premium"], 0) });
+  const cols = Object.keys(repRows[0]);
+  $("rTable").innerHTML = `<thead><tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${repRows.map(r => `<tr${r.Type === "TOTAL" ? ' style="font-weight:600;background:#f0f2ef"' : ""}>${cols.map(c => `<td>${c.includes("premium") ? inr(r[c]) : esc(String(r[c]))}</td>`).join("")}</tr>`).join("")}</tbody>`;
+}
+$("rXls").onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), "Premium"); XLSX.writeFile(wb, `GHC_premium_${$("rFrom").value}_${$("rTo").value}.xlsx`); };
+
+/* ===== types (admin) ===== */
+$("typesBtn").onclick = () => { renderTypes(); $("typesModal").classList.remove("hidden"); }; $("tClose").onclick = () => $("typesModal").classList.add("hidden");
+function renderTypes(){ $("tList").innerHTML = types.map(t => `<li><span>${esc(t.name)}${t.active ? "" : ' <span class="pill cold">inactive</span>'}</span><a href="#" data-t="${t.id}">${t.active ? "Deactivate" : "Activate"}</a></li>`).join("");
+  document.querySelectorAll("[data-t]").forEach(a => a.onclick = async e => { e.preventDefault(); const t = types.find(x => x.id == a.dataset.t); const r = await sb.from("ins_types").update({ active: !t.active }).eq("id", t.id); if (r.error){ toast(r.error.message); return; } t.active = !t.active; await load(); renderTypes(); render(); }); }
+$("tAdd").onclick = async () => { const n = $("tNew").value.trim(); if (!n) return; const r = await sb.from("ins_types").insert({ name: n }); if (r.error){ toast(r.error.message); return; } $("tNew").value = ""; await load(); renderTypes(); render(); toast("Type added ✓"); };
+
+/* ===== all files (admin) ===== */
+$("filesBtn").onclick = () => { renderTree(""); $("filesModal").classList.remove("hidden"); }; $("fClose").onclick = () => $("filesModal").classList.add("hidden");
+$("fSearch").oninput = e => renderTree(e.target.value.toLowerCase());
+function renderTree(q){
+  const cmap = Object.fromEntries(iclients.map(c => [c.id, c]));
+  const groups = {}; files.forEach(f => (groups[f.ins_client_id] ||= []).push(f));
+  $("fTree").innerHTML = Object.entries(groups).map(([cid, list]) => { const c = cmap[cid] || {}; return { c, list }; })
+    .filter(g => !q || (g.c.name || "").toLowerCase().includes(q) || (g.c.pan || "").toLowerCase().includes(q))
+    .sort((a,b) => (a.c.name || "").localeCompare(b.c.name || ""))
+    .map(g => `<div style="margin-bottom:12px"><b>${esc(g.c.name || "?")}</b> <span style="color:var(--muted)">${esc(g.c.pan || "")} · ${g.list.length} file${g.list.length === 1 ? "" : "s"}</span>
+      <ul class="files" style="margin:4px 0 0 14px;padding:0;list-style:none">${g.list.map(f => `<li><span>${esc(f.file_name)} <span style="color:var(--muted)">· ${new Date(f.uploaded_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span></span><a href="#" data-dl="${f.path}">Download</a></li>`).join("")}</ul></div>`).join("") || `<div style="color:var(--muted)">No documents uploaded yet.</div>`;
+  document.querySelectorAll("#fTree [data-dl]").forEach(a => a.onclick = async e => { e.preventDefault(); const { data, error } = await sb.storage.from("policies").createSignedUrl(a.dataset.dl, 300); if (error){ toast(error.message); return; } window.open(data.signedUrl, "_blank"); });
+}
+</script>
+</body>
+</html>
