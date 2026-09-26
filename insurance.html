@@ -69,6 +69,13 @@
       <div><label>Valid from</label><input id="pFrom" type="date"></div>
       <div><label>Valid to</label><input id="pTo" type="date"></div>
     </div>
+    <h3 style="margin-top:18px">Policy holder &amp; members</h3>
+    <div class="grid2">
+      <div><label>Main policy holder</label><input id="pHolder" placeholder="defaults to client name"></div>
+      <div><label>Age</label><input id="pHolderAge" type="number" min="0" max="120"></div>
+    </div>
+    <label>Other members covered <button class="btn ghost small" id="memAdd" style="margin-left:8px">+ Add</button></label>
+    <div id="memList"></div>
     <h3 style="margin-top:18px">Collection</h3>
     <div class="grid2">
       <div><label>Collection date</label><input id="pColDate" type="date"></div>
@@ -121,7 +128,7 @@
 <!-- ALL FILES -->
 <div id="filesModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="upbox" style="max-width:820px;max-height:90vh;overflow:auto">
-    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">All policy documents</h2><input id="fSearch" placeholder="filter by client / PAN" style="width:auto"><button class="x" id="fClose">×</button></div>
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">All policy documents</h2><input id="fSearch" placeholder="filter by client / PAN" style="width:auto"><select id="fType2" style="width:auto"><option value="">All types</option></select><button class="x" id="fClose">×</button></div>
     <div id="fTree" style="margin-top:12px;font-size:13px"></div>
   </div>
 </div>
@@ -129,7 +136,7 @@
 <div id="busy" class="hidden"><div class="sp"></div><div id="busyTxt">Working…</div></div>
 
 <script>
-let ctx, types = [], iclients = [], policies = [], nominees = [], files = [], touchClients = [];
+let ctx, types = [], iclients = [], policies = [], nominees = [], members = [], files = [], touchClients = [];
 let filter = { q: "", type: "", kind: "", stat: "all", sort: "due", dir: 1 }, page = 1, pageSize = 100, editingId = null, openId = null;
 const canEdit = () => ctx.level === "edit";
 
@@ -148,6 +155,7 @@ async function load(){
   iclients = await fetchAll("ins_clients", "id, pan, name, phone, email, client_id");
   policies = await fetchAll("policies", "*", { col: "created_at", asc: false });
   nominees = await fetchAll("policy_nominees", "id, policy_id, name, relation, share");
+  members = await fetchAll("policy_members", "id, policy_id, name, age, relation");
   files = await fetchAll("policy_files", "id, ins_client_id, policy_id, path, file_name, uploaded_at", { col: "uploaded_at", asc: false });
   try { touchClients = await fetchAll("clients", "id, name, pan, client_code"); } catch (e){ touchClients = []; }
   $("fType").innerHTML = `<option value="">All types</option>` + types.filter(t => t.active).map(t => `<option>${esc(t.name)}</option>`).join("");
@@ -182,7 +190,8 @@ function render(){
   if (filter.type) rows = rows.filter(p => p.type === filter.type);
   if (filter.kind) rows = rows.filter(p => p.kind === filter.kind);
   const q = filter.q.toLowerCase();
-  if (q) rows = rows.filter(p => [p.client.name, p.client.phone, p.client.email, p.client.pan, p.policy_no, p.plan_name].some(v => (v || "").toLowerCase().includes(q)));
+  if (q) rows = rows.filter(p => [p.client.name, p.client.phone, p.client.email, p.client.pan, p.policy_no, p.plan_name, p.holder_name,
+    ...members.filter(m => m.policy_id === p.id).map(m => m.name)].some(v => (v || "").toLowerCase().includes(q)));
   const key = p => ({ client: (p.client.name || "").toLowerCase(), type: p.type, policy: p.policy_no, kind: p.kind, valid: p.valid_to || null, due: p.next_due || null, amt: +p.collection_amt || 0 })[filter.sort];
   rows = rows.slice().sort((a,b) => { const ka = key(a), kb = key(b); if (ka == null && kb == null) return 0; if (ka == null) return 1; if (kb == null) return -1; return ka < kb ? -filter.dir : ka > kb ? filter.dir : 0; });
   document.querySelectorAll("th.sort").forEach(th => { th.classList.toggle("on", th.dataset.k === filter.sort); th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === filter.sort ? (filter.dir === 1 ? " ▲" : " ▼") : ""); th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); }; });
@@ -209,20 +218,28 @@ $("fKind").onchange = e => { filter.kind = e.target.value; page = 1; render(); }
 $("clearF").onclick = () => { filter = { ...filter, q: "", type: "", kind: "", stat: "all" }; $("q").value = ""; $("fType").value = ""; $("fKind").value = ""; page = 1; render(); };
 
 /* ===== drawer ===== */
+function memRow(m = {}){ const d = document.createElement("div"); d.className = "nomrow";
+  d.innerHTML = `<input placeholder="Member name" value="${esc(m.name || "")}"><input placeholder="Relation" value="${esc(m.relation || "")}"><input type="number" placeholder="Age" value="${m.age ?? ""}"><button title="remove">×</button>`;
+  d.querySelector("button").onclick = () => d.remove(); $("memList").appendChild(d); }
 function nomRow(n = {}){ const d = document.createElement("div"); d.className = "nomrow";
   d.innerHTML = `<input placeholder="Nominee name" value="${esc(n.name || "")}"><input placeholder="Relation" value="${esc(n.relation || "")}"><input type="number" placeholder="%" value="${n.share ?? ""}"><button title="remove">×</button>`;
   d.querySelector("button").onclick = () => d.remove(); $("nomList").appendChild(d); }
 $("nomAdd").onclick = () => nomRow();
+$("memAdd").onclick = () => memRow();
 function fillForm(p, c){
   $("cPan").value = c?.pan || ""; $("cName").value = c?.name || ""; $("cPhone").value = c?.phone || ""; $("cEmail").value = c?.email || "";
   $("pType").value = p?.type || (types.find(t => t.active) || {}).name || ""; $("pNo").value = p?.policy_no || ""; $("pKind").value = p?.kind || "fresh"; $("pPlan").value = p?.plan_name || "";
   $("pSum").value = p?.sum_assured ?? ""; $("pExBonus").value = p?.existing_bonus ?? ""; $("pBonus").value = p?.bonus ?? "";
-  $("pFrom").value = p?.valid_from || ""; $("pTo").value = p?.valid_to || ""; $("pColDate").value = p?.collection_date || today(); $("pColAmt").value = p?.collection_amt ?? ""; $("pDue").value = p?.next_due || "";
+  $("pFrom").value = p?.valid_from || ""; $("pTo").value = p?.valid_to || ""; delete $("pDue").dataset.touched; $("pColDate").value = p?.collection_date || today(); $("pColAmt").value = p?.collection_amt ?? ""; $("pDue").value = p?.next_due || "";
   $("pRm").value = p?.rm_id || ""; $("pService").checked = !!p?.service_only; $("pNote").value = p?.narration || ""; $("pFile").value = ""; $("pErr").textContent = "";
+  $("pHolder").value = p?.holder_name || c?.name || ""; $("pHolderAge").value = p?.holder_age ?? "";
   $("nomList").innerHTML = ""; (p ? nominees.filter(n => n.policy_id === p.id) : []).forEach(nomRow);
+  $("memList").innerHTML = ""; (p ? members.filter(m => m.policy_id === p.id) : []).forEach(memRow);
   document.querySelectorAll("#drawer input, #drawer select, #drawer textarea").forEach(i => i.disabled = !canEdit());
-  $("pSave").classList.toggle("hidden", !canEdit()); $("nomAdd").classList.toggle("hidden", !canEdit());
+  $("pSave").classList.toggle("hidden", !canEdit()); $("nomAdd").classList.toggle("hidden", !canEdit()); $("memAdd").classList.toggle("hidden", !canEdit());
 }
+$("pTo").onchange = () => { const v = $("pTo").value; if (v && !$("pDue").dataset.touched) $("pDue").value = addDays(v, -1); };
+$("pDue").oninput = () => { $("pDue").dataset.touched = "1"; };
 $("cPan").oninput = () => {
   const pan = $("cPan").value.trim().toUpperCase(); if (pan.length < 10) return;
   const ic = iclients.find(c => (c.pan || "").toUpperCase() === pan); const tc = touchClients.find(c => (c.pan || "").toUpperCase() === pan);
@@ -233,7 +250,8 @@ function openNew(){ editingId = null; openId = null; $("dTitle").textContent = "
 $("newBtn").onclick = openNew;
 async function openPolicy(id){
   const p = policies.find(x => x.id === id); if (!p) return; const c = iclients.find(x => x.id === p.ins_client_id);
-  openId = id; editingId = id; $("dTitle").textContent = `${c?.name || ""} · ${p.policy_no}`; $("dMeta").textContent = `${p.type} · ${p.kind} · ${p.plan_name || ""}`;
+  openId = id; editingId = id; $("dTitle").textContent = `${c?.name || ""} · ${p.policy_no}`; const mm = members.filter(m => m.policy_id === p.id);
+  $("dMeta").textContent = `${p.type} · ${p.kind} · ${p.plan_name || ""}` + (mm.length ? ` · ${mm.length + 1} covered` : "");
   fillForm(p, c); $("pSave").textContent = "Update policy"; $("fCancel").classList.add("hidden"); $("detail").classList.remove("hidden");
   const hist = policies.filter(x => x.policy_no === p.policy_no && x.ins_client_id === p.ins_client_id).sort((a,b) => (b.collection_date || "").localeCompare(a.collection_date || ""));
   $("pHist").innerHTML = hist.map(x => `<li><div class="d">${fmtY(x.collection_date)} · <span class="pill ${x.kind === "fresh" ? "done" : "talk"}">${x.kind}</span> · ${inr(x.collection_amt)} · valid ${fmtY(x.valid_from)} → ${fmtY(x.valid_to)}</div><div class="n">${esc(x.narration || "")}</div></li>`).join("");
@@ -266,13 +284,17 @@ $("pSave").onclick = async () => {
     const prec = { ins_client_id: c.id, type: $("pType").value, policy_no: pno, kind: $("pKind").value, plan_name: $("pPlan").value.trim() || null,
       sum_assured: num("pSum"), existing_bonus: num("pExBonus"), bonus: num("pBonus"), valid_from: $("pFrom").value || null, valid_to: $("pTo").value || null,
       collection_date: $("pColDate").value || null, collection_amt: num("pColAmt"), next_due: $("pDue").value || null, rm_id: $("pRm").value || null,
-      service_only: $("pService").checked, narration: $("pNote").value.trim() || null };
+      service_only: $("pService").checked, narration: $("pNote").value.trim() || null,
+      holder_name: $("pHolder").value.trim() || name, holder_age: $("pHolderAge").value === "" ? null : +$("pHolderAge").value };
     let p;
-    if (editingId){ const r = await sb.from("policies").update(prec).eq("id", editingId).select().single(); if (r.error) throw r.error; p = r.data; policies = policies.map(x => x.id === p.id ? p : x); await sb.from("policy_nominees").delete().eq("policy_id", p.id); nominees = nominees.filter(n => n.policy_id !== p.id); }
+    if (editingId){ const r = await sb.from("policies").update(prec).eq("id", editingId).select().single(); if (r.error) throw r.error; p = r.data; policies = policies.map(x => x.id === p.id ? p : x); await sb.from("policy_nominees").delete().eq("policy_id", p.id); nominees = nominees.filter(n => n.policy_id !== p.id);
+      await sb.from("policy_members").delete().eq("policy_id", p.id); members = members.filter(m => m.policy_id !== p.id); }
     else { const r = await sb.from("policies").insert({ ...prec, created_by: ctx.me.id }).select().single(); if (r.error) throw r.error; p = r.data; policies.unshift(p); }
     // nominees
     const noms = [...document.querySelectorAll("#nomList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, share: i[2].value === "" ? null : +i[2].value }; }).filter(n => n.name);
     if (noms.length){ const r = await sb.from("policy_nominees").insert(noms).select(); if (r.error) throw r.error; nominees.push(...r.data); }
+    const mems = [...document.querySelectorAll("#memList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, age: i[2].value === "" ? null : +i[2].value }; }).filter(m => m.name);
+    if (mems.length){ const r = await sb.from("policy_members").insert(mems).select(); if (r.error) throw r.error; members.push(...r.data); }
     // file
     const f = $("pFile").files[0];
     if (f){
@@ -311,11 +333,14 @@ function renderTypes(){ $("tList").innerHTML = types.map(t => `<li><span>${esc(t
 $("tAdd").onclick = async () => { const n = $("tNew").value.trim(); if (!n) return; const r = await sb.from("ins_types").insert({ name: n }); if (r.error){ toast(r.error.message); return; } $("tNew").value = ""; await load(); renderTypes(); render(); toast("Type added ✓"); };
 
 /* ===== all files (admin) ===== */
-$("filesBtn").onclick = () => { renderTree(""); $("filesModal").classList.remove("hidden"); }; $("fClose").onclick = () => $("filesModal").classList.add("hidden");
+$("filesBtn").onclick = () => { $("fType2").innerHTML = `<option value="">All types</option>` + types.map(t => `<option>${esc(t.name)}</option>`).join(""); renderTree(""); $("filesModal").classList.remove("hidden"); };
+$("fType2").onchange = () => renderTree($("fSearch").value.toLowerCase()); $("fClose").onclick = () => $("filesModal").classList.add("hidden");
 $("fSearch").oninput = e => renderTree(e.target.value.toLowerCase());
 function renderTree(q){
   const cmap = Object.fromEntries(iclients.map(c => [c.id, c]));
-  const groups = {}; files.forEach(f => (groups[f.ins_client_id] ||= []).push(f));
+  const ty = $("fType2") ? $("fType2").value : "";
+  const pmapT = Object.fromEntries(policies.map(p => [p.id, p.type]));
+  const groups = {}; files.filter(f => !ty || pmapT[f.policy_id] === ty).forEach(f => (groups[f.ins_client_id] ||= []).push(f));
   $("fTree").innerHTML = Object.entries(groups).map(([cid, list]) => { const c = cmap[cid] || {}; return { c, list }; })
     .filter(g => !q || (g.c.name || "").toLowerCase().includes(q) || (g.c.pan || "").toLowerCase().includes(q))
     .sort((a,b) => (a.c.name || "").localeCompare(b.c.name || ""))

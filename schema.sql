@@ -333,3 +333,17 @@ drop policy if exists "policies bucket write" on storage.objects;
 create policy "policies bucket write" on storage.objects for insert with check (bucket_id = 'policies' and public.has_module('insurance','edit'));
 drop policy if exists "policies bucket manage" on storage.objects;
 create policy "policies bucket manage" on storage.objects for all using (bucket_id = 'policies' and public.is_manager()) with check (bucket_id = 'policies' and public.is_manager());
+
+-- v4.1: policy holder + covered members
+alter table public.policies add column if not exists holder_name text;
+alter table public.policies add column if not exists holder_age int;
+create table if not exists public.policy_members (
+  id uuid primary key default gen_random_uuid(),
+  policy_id uuid not null references public.policies(id) on delete cascade,
+  name text not null, age int, relation text
+);
+alter table public.policy_members enable row level security;
+drop policy if exists "members: read" on public.policy_members;
+create policy "members: read" on public.policy_members for select using (public.has_module('insurance','view'));
+drop policy if exists "members: edit" on public.policy_members;
+create policy "members: edit" on public.policy_members for all using (public.has_module('insurance','edit')) with check (public.has_module('insurance','edit'));
