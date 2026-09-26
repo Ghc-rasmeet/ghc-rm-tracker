@@ -61,6 +61,9 @@
       <div><label>Insurance type</label><select id="pType"></select></div>
       <div><label>Policy no</label><input id="pNo"></div>
       <div><label>Fresh / Renewal</label><select id="pKind"><option value="fresh">Fresh</option><option value="renewal">Renewal</option></select></div>
+      <div><label>Main policy holder</label><input id="pHolder" placeholder="defaults to client name"></div>
+      <div><label>Holder date of birth</label><input id="pHolderDob" type="date"><div id="pHolderAgeTxt" style="font-size:12px;color:var(--muted);margin-top:2px"></div></div>
+      <div style="grid-column:1/-1"><label>Other members covered <button class="btn ghost small" id="memAdd" style="margin-left:8px">+ Add</button></label><div id="memList"></div></div>
       <div><label>Plan name</label><input id="pPlan"></div>
       <div><label>Basic sum assured</label><input id="pSum" type="number" min="0"></div>
       <div><label>Existing bonus</label><input id="pExBonus" type="number" min="0"></div>
@@ -69,13 +72,6 @@
       <div><label>Valid from</label><input id="pFrom" type="date"></div>
       <div><label>Valid to</label><input id="pTo" type="date"></div>
     </div>
-    <h3 style="margin-top:18px">Policy holder &amp; members</h3>
-    <div class="grid2">
-      <div><label>Main policy holder</label><input id="pHolder" placeholder="defaults to client name"></div>
-      <div><label>Age</label><input id="pHolderAge" type="number" min="0" max="120"></div>
-    </div>
-    <label>Other members covered <button class="btn ghost small" id="memAdd" style="margin-left:8px">+ Add</button></label>
-    <div id="memList"></div>
     <h3 style="margin-top:18px">Collection</h3>
     <div class="grid2">
       <div><label>Collection date</label><input id="pColDate" type="date"></div>
@@ -155,7 +151,7 @@ async function load(){
   iclients = await fetchAll("ins_clients", "id, pan, name, phone, email, client_id");
   policies = await fetchAll("policies", "*", { col: "created_at", asc: false });
   nominees = await fetchAll("policy_nominees", "id, policy_id, name, relation, share");
-  members = await fetchAll("policy_members", "id, policy_id, name, age, relation");
+  members = await fetchAll("policy_members", "id, policy_id, name, age, dob, relation");
   files = await fetchAll("policy_files", "id, ins_client_id, policy_id, path, file_name, uploaded_at", { col: "uploaded_at", asc: false });
   try { touchClients = await fetchAll("clients", "id, name, pan, client_code"); } catch (e){ touchClients = []; }
   $("fType").innerHTML = `<option value="">All types</option>` + types.filter(t => t.active).map(t => `<option>${esc(t.name)}</option>`).join("");
@@ -218,8 +214,12 @@ $("fKind").onchange = e => { filter.kind = e.target.value; page = 1; render(); }
 $("clearF").onclick = () => { filter = { ...filter, q: "", type: "", kind: "", stat: "all" }; $("q").value = ""; $("fType").value = ""; $("fKind").value = ""; page = 1; render(); };
 
 /* ===== drawer ===== */
-function memRow(m = {}){ const d = document.createElement("div"); d.className = "nomrow";
-  d.innerHTML = `<input placeholder="Member name" value="${esc(m.name || "")}"><input placeholder="Relation" value="${esc(m.relation || "")}"><input type="number" placeholder="Age" value="${m.age ?? ""}"><button title="remove">×</button>`;
+function ageFrom(dob){ if (!dob) return null; const b = new Date(dob + "T00:00:00"), n = new Date();
+  let a = n.getFullYear() - b.getFullYear(); const m = n.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && n.getDate() < b.getDate())) a--; return a >= 0 && a < 130 ? a : null; }
+function memRow(m = {}){ const d = document.createElement("div"); d.className = "nomrow"; d.style.gridTemplateColumns = "1.6fr 1fr 1.2fr 46px 30px";
+  d.innerHTML = `<input placeholder="Member name" value="${esc(m.name || "")}"><input placeholder="Relation" value="${esc(m.relation || "")}"><input type="date" title="Date of birth" value="${m.dob || ""}"><span class="age" style="font-size:12px;color:var(--muted);text-align:center">${m.dob ? ageFrom(m.dob) + "y" : (m.age ?? "")}</span><button title="remove">×</button>`;
+  const dob = d.querySelectorAll("input")[2]; dob.oninput = () => { const a = ageFrom(dob.value); d.querySelector(".age").textContent = a == null ? "" : a + "y"; };
   d.querySelector("button").onclick = () => d.remove(); $("memList").appendChild(d); }
 function nomRow(n = {}){ const d = document.createElement("div"); d.className = "nomrow";
   d.innerHTML = `<input placeholder="Nominee name" value="${esc(n.name || "")}"><input placeholder="Relation" value="${esc(n.relation || "")}"><input type="number" placeholder="%" value="${n.share ?? ""}"><button title="remove">×</button>`;
@@ -232,12 +232,14 @@ function fillForm(p, c){
   $("pSum").value = p?.sum_assured ?? ""; $("pExBonus").value = p?.existing_bonus ?? ""; $("pBonus").value = p?.bonus ?? "";
   $("pFrom").value = p?.valid_from || ""; $("pTo").value = p?.valid_to || ""; delete $("pDue").dataset.touched; $("pColDate").value = p?.collection_date || today(); $("pColAmt").value = p?.collection_amt ?? ""; $("pDue").value = p?.next_due || "";
   $("pRm").value = p?.rm_id || ""; $("pService").checked = !!p?.service_only; $("pNote").value = p?.narration || ""; $("pFile").value = ""; $("pErr").textContent = "";
-  $("pHolder").value = p?.holder_name || c?.name || ""; $("pHolderAge").value = p?.holder_age ?? "";
+  $("pHolder").value = p?.holder_name || c?.name || ""; $("pHolderDob").value = p?.holder_dob || "";
+  $("pHolderAgeTxt").textContent = p?.holder_dob ? ageFrom(p.holder_dob) + " years" : (p?.holder_age ? p.holder_age + " years" : "");
   $("nomList").innerHTML = ""; (p ? nominees.filter(n => n.policy_id === p.id) : []).forEach(nomRow);
   $("memList").innerHTML = ""; (p ? members.filter(m => m.policy_id === p.id) : []).forEach(memRow);
   document.querySelectorAll("#drawer input, #drawer select, #drawer textarea").forEach(i => i.disabled = !canEdit());
   $("pSave").classList.toggle("hidden", !canEdit()); $("nomAdd").classList.toggle("hidden", !canEdit()); $("memAdd").classList.toggle("hidden", !canEdit());
 }
+$("pHolderDob").oninput = () => { const a = ageFrom($("pHolderDob").value); $("pHolderAgeTxt").textContent = a == null ? "" : a + " years"; };
 $("pTo").onchange = () => { const v = $("pTo").value; if (v && !$("pDue").dataset.touched) $("pDue").value = addDays(v, -1); };
 $("pDue").oninput = () => { $("pDue").dataset.touched = "1"; };
 $("cPan").oninput = () => {
@@ -285,7 +287,7 @@ $("pSave").onclick = async () => {
       sum_assured: num("pSum"), existing_bonus: num("pExBonus"), bonus: num("pBonus"), valid_from: $("pFrom").value || null, valid_to: $("pTo").value || null,
       collection_date: $("pColDate").value || null, collection_amt: num("pColAmt"), next_due: $("pDue").value || null, rm_id: $("pRm").value || null,
       service_only: $("pService").checked, narration: $("pNote").value.trim() || null,
-      holder_name: $("pHolder").value.trim() || name, holder_age: $("pHolderAge").value === "" ? null : +$("pHolderAge").value };
+      holder_name: $("pHolder").value.trim() || name, holder_dob: $("pHolderDob").value || null, holder_age: ageFrom($("pHolderDob").value) };
     let p;
     if (editingId){ const r = await sb.from("policies").update(prec).eq("id", editingId).select().single(); if (r.error) throw r.error; p = r.data; policies = policies.map(x => x.id === p.id ? p : x); await sb.from("policy_nominees").delete().eq("policy_id", p.id); nominees = nominees.filter(n => n.policy_id !== p.id);
       await sb.from("policy_members").delete().eq("policy_id", p.id); members = members.filter(m => m.policy_id !== p.id); }
@@ -293,7 +295,7 @@ $("pSave").onclick = async () => {
     // nominees
     const noms = [...document.querySelectorAll("#nomList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, share: i[2].value === "" ? null : +i[2].value }; }).filter(n => n.name);
     if (noms.length){ const r = await sb.from("policy_nominees").insert(noms).select(); if (r.error) throw r.error; nominees.push(...r.data); }
-    const mems = [...document.querySelectorAll("#memList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, age: i[2].value === "" ? null : +i[2].value }; }).filter(m => m.name);
+    const mems = [...document.querySelectorAll("#memList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, dob: i[2].value || null, age: ageFrom(i[2].value) }; }).filter(m => m.name);
     if (mems.length){ const r = await sb.from("policy_members").insert(mems).select(); if (r.error) throw r.error; members.push(...r.data); }
     // file
     const f = $("pFile").files[0];

@@ -347,3 +347,7 @@ drop policy if exists "members: read" on public.policy_members;
 create policy "members: read" on public.policy_members for select using (public.has_module('insurance','view'));
 drop policy if exists "members: edit" on public.policy_members;
 create policy "members: edit" on public.policy_members for all using (public.has_module('insurance','edit')) with check (public.has_module('insurance','edit'));
+
+-- v4.2: date of birth for holder and members (age computed)
+alter table public.policies add column if not exists holder_dob date;
+alter table public.policy_members add column if not exists dob date;
