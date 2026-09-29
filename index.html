@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="common.js"></script>
 </head>
 <body>
@@ -54,6 +55,17 @@
       </div>
     </div>
 
+    <div id="backupArea" class="hidden" style="margin-top:34px;border-top:1px solid var(--line);padding-top:18px">
+      <h3 style="font-size:14px;margin:0 0 4px">Backup &amp; restore</h3>
+      <p class="sub" style="margin:0 0 10px">One file with every module's data, all uploaded documents and the app's own source. Take one every Friday and keep it in Drive.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn" id="bkBtn">Backup everything</button>
+        <button class="btn ghost" id="rsBtn" style="color:var(--warn);border-color:var(--warn)">Restore from backup</button>
+        <input type="file" id="rsFile" accept=".zip" class="hidden">
+        <span id="bkLast" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
+
     <div style="margin-top:30px"><button class="btn ghost small" id="pwBtn">Change my password</button></div>
   </main>
 </div>
@@ -87,6 +99,7 @@ async function boot(){
     const has = ctx.isSuper || ctx.access[m.key];
     return `<a class="tile ${has ? "" : "locked"}" href="${m.href}"><b>${esc(m.name)}</b><span>${esc(m.desc)}</span>${has ? "" : `<span style="display:block;margin-top:6px;color:var(--warn)">No access</span>`}</a>`;
   }).join("");
+  if (ctx.isSuper || ctx.isMgr) $("backupArea").classList.remove("hidden");
   if (ctx.isSuper || MODULES.some(m => canGrant(m.key))){
     $("adminArea").classList.remove("hidden");
     try { userModules = await fetchAll("user_modules", "user_id, module, level, can_reveal"); } catch (e){ userModules = []; }
@@ -174,6 +187,113 @@ $("nuAdd").onclick = async () => {
   catch (e){ $("nuErr").textContent = e.message; }
   $("nuAdd").disabled = false;
 };
+/* ================= BACKUP / RESTORE ================= */
+const TABLES = ["modules","profiles","user_modules","clients","touches","touch_log","reviews","review_log","upload_log",
+  "ins_types","ins_clients","policies","policy_members","policy_nominees","policy_files","subs","subs_log"];
+const RESTORE_ORDER = ["modules","user_modules","clients","touches","touch_log","reviews","review_log","upload_log",
+  "ins_types","ins_clients","policies","policy_members","policy_nominees","policy_files","subs","subs_log"];
+const APP_FILES = ["index.html","touch.html","insurance.html","subscriptions.html","common.js","style.css","schema.sql","admin-users.ts","README.md"];
+
+function busy(on, txt){ let b = $("busy");
+  if (!b){ b = document.createElement("div"); b.id = "busy"; b.innerHTML = '<div class="sp"></div><div id="busyTxt"></div><div style="font-size:13px;color:var(--muted)">Please keep this tab open</div>'; document.body.appendChild(b); }
+  b.classList.toggle("hidden", !on); if (txt) $("busyTxt").textContent = txt; }
+
+async function listBucket(prefix){
+  prefix = prefix || "";
+  const out = [];
+  const { data, error } = await sb.storage.from("policies").list(prefix, { limit: 1000 });
+  if (error || !data) return out;
+  for (const e of data){
+    const p = prefix ? prefix + "/" + e.name : e.name;
+    if (!e.id) out.push.apply(out, await listBucket(p)); else out.push(p);
+  }
+  return out;
+}
+
+$("bkBtn").onclick = async () => {
+  busy(true, "Preparing backup…");
+  try {
+    const zip = new JSZip(), data = zip.folder("data"), app = zip.folder("app"), docs = zip.folder("files");
+    const counts = {};
+    for (const t of TABLES){
+      busy(true, "Reading " + t + "…");
+      try { const rows = await fetchAll(t, "*"); counts[t] = rows.length; data.file(t + ".json", JSON.stringify(rows, null, 1)); }
+      catch (e){ counts[t] = "skipped"; }
+    }
+    busy(true, "Collecting documents…");
+    let paths = [];
+    try { paths = await listBucket(""); } catch (e){}
+    let got = 0;
+    for (const p of paths){
+      busy(true, "Documents " + (++got) + " / " + paths.length);
+      try { const r = await sb.storage.from("policies").download(p); if (!r.error && r.data) docs.file(p, r.data); } catch (e){}
+    }
+    busy(true, "Adding app source…");
+    for (const f of APP_FILES){ try { const r = await fetch(f, { cache: "no-store" }); if (r.ok) app.file(f, await r.text()); } catch (e){} }
+    const manifest = { app: "GHC Hub", version: APP_VERSION, taken_at: new Date().toISOString(), taken_by: ctx.profile.full_name,
+      supabase_url: SUPABASE_URL, tables: counts, documents: paths.length,
+      note: "Restore with the Restore button in GHC Hub, or rebuild from app/schema.sql then restore this file." };
+    zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+    zip.file("README.txt", "GHC Hub backup\n\ndata/    every table as JSON\nfiles/   uploaded policy documents\napp/     the app's own source and database blueprint\n\nTo restore: sign in as super admin, Home > Restore from backup, pick this zip.\nTo rebuild from nothing: create a Supabase project, run app/schema.sql, deploy app/admin-users.ts, create the logins, then restore this file.\n");
+    busy(true, "Compressing…");
+    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+    const url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = "GHC_Hub_backup_" + new Date().toISOString().slice(0,10) + ".zip"; a.click(); URL.revokeObjectURL(url);
+    busy(false);
+    const totalRows = Object.keys(counts).reduce((n, k) => n + (typeof counts[k] === "number" ? counts[k] : 0), 0);
+    $("bkLast").textContent = "Last backup just now · " + totalRows + " rows · " + paths.length + " documents";
+    toast("Backup downloaded ✓");
+  } catch (e){ busy(false); alert("Backup failed: " + e.message); }
+};
+
+$("rsBtn").onclick = () => $("rsFile").click();
+$("rsFile").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return; e.target.value = "";
+  let zip, man;
+  try { zip = await JSZip.loadAsync(file); man = JSON.parse(await zip.file("manifest.json").async("string")); }
+  catch (err){ alert("That is not a GHC Hub backup file."); return; }
+  const totalRows = Object.keys(man.tables || {}).reduce((n, k) => n + (typeof man.tables[k] === "number" ? man.tables[k] : 0), 0);
+  if (!confirm("Restore from " + file.name + "?\n\nTaken " + new Date(man.taken_at).toLocaleString("en-IN") + " by " + man.taken_by + " (" + man.version + ")\n" + totalRows + " rows · " + man.documents + " documents\n\nEVERYTHING currently in the Hub will be replaced.")) return;
+  if (prompt("Type RESTORE to confirm:") !== "RESTORE"){ toast("Cancelled"); return; }
+  busy(true, "Restoring…");
+  try {
+    const read = async t => { const f = zip.file("data/" + t + ".json"); return f ? JSON.parse(await f.async("string")) : null; };
+    const oldProf = (await read("profiles")) || [];
+    const byEmail = {}; ctx.profiles.forEach(p => { if (p.email) byEmail[p.email.toLowerCase()] = p.id; });
+    const idMap = {}; oldProf.forEach(p => { const c = byEmail[(p.email || "").toLowerCase()]; if (c) idMap[p.id] = c; });
+    const cur = {}; ctx.profiles.forEach(p => cur[p.id] = true);
+    const fixIds = r => { const o = {};
+      Object.keys(r).forEach(k => { let v = r[k];
+        if (["rm_id","by_user","created_by","uploaded_by","user_id"].indexOf(k) >= 0 && v && !cur[v]) v = idMap[v] || null;
+        o[k] = v; });
+      return o; };
+    const rev = RESTORE_ORDER.slice().reverse();
+    for (const t of rev){
+      busy(true, "Clearing " + t + "…");
+      try { await sb.from(t).delete().not("id", "is", null); } catch (err){}
+    }
+    for (const t of RESTORE_ORDER){
+      const rs = await read(t); if (!rs || !rs.length) continue;
+      const clean = rs.map(fixIds).filter(r => t !== "user_modules" || cur[r.user_id]);
+      for (let i = 0; i < clean.length; i += 500){
+        busy(true, t + " " + Math.min(i + 500, clean.length) + " / " + clean.length);
+        const { error } = await sb.from(t).insert(clean.slice(i, i + 500));
+        if (error) throw new Error(t + ": " + error.message);
+      }
+    }
+    const fileEntries = Object.keys(zip.files).filter(k => k.indexOf("files/") === 0 && !zip.files[k].dir);
+    let n = 0;
+    for (const k of fileEntries){
+      busy(true, "Documents " + (++n) + " / " + fileEntries.length);
+      const blob = await zip.files[k].async("blob");
+      await sb.storage.from("policies").upload(k.slice(6), blob, { upsert: true });
+    }
+    busy(false);
+    alert("Restore complete.\n\n" + totalRows + " rows · " + fileEntries.length + " documents");
+    location.reload();
+  } catch (err){ busy(false); alert("Restore failed: " + err.message + "\n\nNothing further was changed."); }
+};
+
 $("pwBtn").onclick = async () => {
   const p1 = prompt("New password (min 6 characters):"); if (p1 === null) return;
   if (p1.length < 6){ toast("Too short"); return; }
