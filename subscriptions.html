@@ -51,7 +51,7 @@
   <div class="dbody">
     <div class="grid2">
       <div style="grid-column:1/-1"><label>Subscription name</label><input id="sName" placeholder="e.g. Zoho One, Canva Pro"></div>
-      <div><label>Category</label><select id="sCat"><option value="professional">Professional</option><option value="personal">Personal</option><option value="both">Both</option></select></div>
+      <div><label>Category</label><select id="sCat"><option value="professional">Professional</option><option value="both">Both</option><option value="personal">Personal</option></select></div>
       <div><label>Payment mode</label><select id="sMode"><option value="">— select —</option><option>credit card</option><option>debit card</option><option>UPI</option><option>net banking</option><option>cash</option><option>other</option></select></div>
       <div><label>Amount</label><input id="sAmt" type="number" min="0"></div>
       <div><label>Billing cycle</label><select id="sCycle"><option>monthly</option><option>quarterly</option><option>half-yearly</option><option value="yearly" selected>yearly</option><option>one-time</option></select></div>
@@ -93,6 +93,13 @@
   </div>
 </aside>
 
+<div id="dupModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:820px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center"><h2 style="margin:0">Possible duplicates</h2><button class="x" id="dClose2">×</button></div>
+    <div class="fml" style="margin:6px 0 12px">Names at least 70% alike, active subscriptions only. Check whether two records are really the same service.</div>
+    <div id="dupBody"></div>
+  </div>
+</div>
 <div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="upbox" style="max-width:760px;max-height:90vh;overflow:auto">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Spend report</h2>
@@ -116,6 +123,7 @@ const perMonth = s => { const m = CYCLE_MONTHS[s.cycle] ?? 12; return m ? (+s.am
   await load();
   $("app").classList.remove("hidden");
   if (!canEdit()) $("newBtn").classList.add("hidden");
+  if (!ctx.isSuper){ [...$("sCat").options].forEach(o => { if (o.value === "personal") o.remove(); }); [...$("fCat").options].forEach(o => { if (o.value === "personal") o.remove(); }); }
   render();
 })();
 
@@ -125,6 +133,27 @@ async function load(){
   $("fMode").innerHTML = `<option value="">All payment modes</option>` + [...new Set(subs.map(s => s.pay_mode).filter(Boolean))].sort().map(m => `<option>${esc(m)}</option>`).join("");
 }
 
+/* name similarity — bigram dice coefficient */
+function norm(s){ return (s || "").toLowerCase().replace(/\b(pro|plus|premium|subscription|annual|yearly|monthly|plan|inc|ltd|india)\b/g, "").replace(/[^a-z0-9]/g, ""); }
+function sim(a, b){
+  a = norm(a); b = norm(b); if (!a || !b) return 0; if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+  const big = x => { const m = new Map(); for (let i = 0; i < x.length - 1; i++){ const k = x.slice(i, i+2); m.set(k, (m.get(k) || 0) + 1); } return m; };
+  const A = big(a), B = big(b); let hit = 0, total = 0;
+  A.forEach((n, k) => { total += n; hit += Math.min(n, B.get(k) || 0); });
+  B.forEach(n => total += n);
+  return (2 * hit) / total;
+}
+function dupGroups(){
+  const act = subs.filter(s => s.status === "active"), groups = [], seen = new Set();
+  for (let i = 0; i < act.length; i++){
+    if (seen.has(act[i].id)) continue;
+    const g = [act[i]];
+    for (let j = i + 1; j < act.length; j++){ if (seen.has(act[j].id)) continue; if (sim(act[i].name, act[j].name) >= 0.7){ g.push(act[j]); seen.add(act[j].id); } }
+    if (g.length > 1){ seen.add(act[i].id); groups.push(g); }
+  }
+  return groups;
+}
 function render(){
   const t = today(), d7 = addDays(t, 7), d30 = addDays(t, 30);
   const act = subs.filter(s => s.status === "active");
@@ -134,13 +163,15 @@ function render(){
     tile("due30","Due in 30 days",act.filter(s => s.end_date && s.end_date >= t && s.end_date <= d30).length,"amb") +
     tile("lapsed","Past due",act.filter(s => s.end_date && s.end_date < t).length,"mag") +
     tile("both","In both",act.filter(s => s.category === "both").length) +
-    tile("cancelled","Cancelled",subs.filter(s => s.status === "cancelled").length);
+    tile("cancelled","Cancelled",subs.filter(s => s.status === "cancelled").length) +
+    tile("dups","Possible duplicates",dupGroups().reduce((n, g) => n + g.length, 0),"mag");
   const mon = act.reduce((x, s) => x + perMonth(s), 0);
   $("spend").innerHTML = tile("x","Per month",inr(mon),"pct") + tile("x","Per year",inr(mon * 12),"pct") +
     tile("x","Professional",inr(act.filter(s => s.category !== "personal").reduce((x, s) => x + perMonth(s), 0)),"grn") +
     tile("x","Personal",inr(act.filter(s => s.category !== "professional").reduce((x, s) => x + perMonth(s), 0)),"grn");
   document.querySelectorAll(".stat[data-k]").forEach(el => el.onclick = () => {
     const k = el.dataset.k; if (k === "x") return;
+    if (k === "dups"){ showDups(); return; }
     filter.stat = filter.stat === k ? "" : k;
     if (k === "cancelled"){ filter.status = "cancelled"; $("fStatus").value = "cancelled"; } else { filter.status = "active"; $("fStatus").value = "active"; }
     page = 1; render();
@@ -152,6 +183,7 @@ function render(){
   if (filter.stat === "due30") rows = rows.filter(s => s.end_date && s.end_date >= t && s.end_date <= d30);
   if (filter.stat === "lapsed") rows = rows.filter(s => s.end_date && s.end_date < t);
   if (filter.stat === "both") rows = rows.filter(s => s.category === "both");
+  if (filter.stat === "dups"){ const ids = new Set(dupGroups().flat().map(s => s.id)); rows = rows.filter(s => ids.has(s.id)); }
   if (filter.cat) rows = rows.filter(s => s.category === filter.cat);
   if (filter.mode) rows = rows.filter(s => s.pay_mode === filter.mode);
   const q = filter.q.toLowerCase();
@@ -166,10 +198,11 @@ function render(){
   $("pagerTop").innerHTML = pg; $("pagerBot").innerHTML = pg;
   document.querySelectorAll("[data-pg=prev]").forEach(b => b.onclick = () => { page--; render(); }); document.querySelectorAll("[data-pg=next]").forEach(b => b.onclick = () => { page++; render(); });
 
+  const dupIds = new Set(dupGroups().flat().map(s => s.id));
   $("rows").innerHTML = rows.slice(from, to).map(s => {
     const due = s.end_date && s.status === "active" ? (s.end_date < t ? "mag" : s.end_date <= d7 ? "red" : s.end_date <= d30 ? "hot" : "talk") : "talk";
     return `<tr class="row" data-id="${s.id}">
-      <td><div>${esc(s.name)}${s.sensitive ? ' <span class="pill cold" title="login hidden">🔒</span>' : ""}</div>${s.link ? `<div style="font-size:11px"><a href="${esc(s.link)}" target="_blank" onclick="event.stopPropagation()">open</a></div>` : ""}</td>
+      <td><div>${dupIds.has(s.id) ? '<span title="possible duplicate" style="color:#c026a8;font-weight:600">⚠ </span>' : ""}${esc(s.name)}${s.sensitive ? ' <span class="pill cold" title="login hidden">🔒</span>' : ""}</div>${s.link ? `<div style="font-size:11px"><a href="${esc(s.link)}" target="_blank" onclick="event.stopPropagation()">open</a></div>` : ""}</td>
       <td><span class="pill ${s.category === "both" ? "admin" : s.category === "personal" ? "talk" : "done"}">${s.category}</span></td>
       <td>${inr(s.amount)}<div style="font-size:11px;color:var(--muted)">${esc(s.cycle || "")}</div></td>
       <td>${inr(Math.round(perMonth(s)))}</td>
@@ -277,6 +310,17 @@ $("sRenew").onclick = async () => {
 /* ---- report ---- */
 let repRows = [];
 $("repBtn").onclick = () => { runRep(); $("repModal").classList.remove("hidden"); };
+$("dClose2").onclick = () => $("dupModal").classList.add("hidden");
+function showDups(){
+  const gs = dupGroups();
+  $("dupBody").innerHTML = gs.length ? gs.map(g => `<div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px">
+    <b>${esc(g[0].name)}</b> <span style="color:var(--muted)">· ${g.length} records</span>
+    <table style="font-size:13px;margin-top:6px"><thead><tr><th>Name</th><th>Category</th><th>Amount</th><th>Renews</th><th>Email / user</th><th>Paid by</th></tr></thead><tbody>
+    ${g.map(s => `<tr data-open="${s.id}" style="cursor:pointer"><td>${esc(s.name)}</td><td>${esc(s.category)}</td><td>${inr(s.amount)} <span style="color:var(--muted)">${esc(s.cycle || "")}</span></td><td>${fmtY(s.end_date)}</td><td>${esc(s.email || s.username || "—")}</td><td>${esc(s.pay_mode || "")}</td></tr>`).join("")}
+    </tbody></table></div>`).join("") : `<div style="color:var(--muted)">No likely duplicates found.</div>`;
+  document.querySelectorAll("#dupBody [data-open]").forEach(tr => tr.onclick = () => { $("dupModal").classList.add("hidden"); openSub(tr.dataset.open); });
+  $("dupModal").classList.remove("hidden");
+}
 $("rClose").onclick = () => $("repModal").classList.add("hidden");
 $("rBy").onchange = runRep;
 function runRep(){
