@@ -36,7 +36,7 @@
       <div class="tabs"><button class="on" data-t="access">Module access</button><button data-t="users">Users</button></div>
 
       <div id="tab-access">
-        <p class="sub">Tick to give access. <b>edit</b> = can add/change · <b>view</b> = read only. Managers and admins have all modules automatically.</p>
+        <p class="sub"><b>view</b> read only · <b>edit</b> add and change · <b>admin</b> can also grant this module to others. <b>reveal</b> = may see hidden passwords in that module. Super admin has every module.</p>
         <div class="tablewrap"><table class="grid-acc" id="accGrid"></table></div>
       </div>
 
@@ -46,7 +46,7 @@
         <div class="grid2" style="max-width:560px">
           <div><label>Full name</label><input id="nuName"></div>
           <div><label>Email</label><input id="nuEmail" type="email"></div>
-          <div><label>Role</label><select id="nuRole"><option value="rm">User</option><option value="manager">Manager</option></select></div>
+          <div><label>Role</label><select id="nuRole"><option value="rm">Coordinator</option><option value="manager">Admin</option></select></div>
           <div><label>Starting password</label><input id="nuPass" placeholder="min 6 characters"></div>
         </div>
         <div class="err" id="nuErr"></div>
@@ -62,8 +62,11 @@
 const MODULES = [
   { key: "touch",     name: "Touch & Review System", desc: "Client touches, written reviews, quarterly dashboards", href: "touch.html" },
   { key: "insurance", name: "Insurance",             desc: "Policies, renewals, documents, due-date tracking",     href: "insurance.html" },
+  { key: "subs",      name: "Subscriptions",         desc: "Renewals, spend, logins, cancellations",               href: "subscriptions.html" },
 ];
 let ctx = null, userModules = [];
+const myLevel = k => ctx.isSuper ? "admin" : (ctx.access[k] || "");
+const canGrant = k => ctx.isSuper || myLevel(k) === "admin";
 
 $("loginBtn").onclick = async () => {
   $("loginErr").textContent = ""; $("loginBtn").disabled = true;
@@ -81,12 +84,12 @@ async function boot(){
   shellHeader("Home", ctx);
   $("hello").textContent = `Welcome, ${ctx.profile.full_name.split(" ")[0]}`;
   $("tiles").innerHTML = MODULES.map(m => {
-    const has = ctx.isMgr || ctx.access[m.key];
+    const has = ctx.isSuper || ctx.access[m.key];
     return `<a class="tile ${has ? "" : "locked"}" href="${m.href}"><b>${esc(m.name)}</b><span>${esc(m.desc)}</span>${has ? "" : `<span style="display:block;margin-top:6px;color:var(--warn)">No access</span>`}</a>`;
   }).join("");
-  if (ctx.isMgr){
+  if (ctx.isSuper || MODULES.some(m => canGrant(m.key))){
     $("adminArea").classList.remove("hidden");
-    try { userModules = await fetchAll("user_modules", "user_id, module, level"); } catch (e){ userModules = []; }
+    try { userModules = await fetchAll("user_modules", "user_id, module, level, can_reveal"); } catch (e){ userModules = []; }
     renderAccess(); renderUsers();
   }
 }
@@ -97,22 +100,40 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 
 /* ---- access grid ---- */
 function renderAccess(){
+  const cols = MODULES.filter(m => canGrant(m.key));
   const users = ctx.profiles.slice().sort((a,b) => a.full_name.localeCompare(b.full_name));
-  $("accGrid").innerHTML = `<thead><tr><th>User</th><th>Role</th>${MODULES.map(m => `<th>${esc(m.name)}</th>`).join("")}</tr></thead><tbody>` +
-    users.map(u => `<tr><td>${esc(u.full_name)}<div style="font-size:11px;color:var(--muted)">${esc(u.email || "")}</div></td><td>${u.role === "rm" ? "user" : u.role}</td>` +
-      MODULES.map(m => {
-        if (u.role !== "rm") return `<td style="color:var(--muted)">all</td>`;
-        const cur = (userModules.find(x => x.user_id === u.id && x.module === m.key) || {}).level || "";
-        return `<td><select data-u="${u.id}" data-m="${m.key}"><option value="">— none —</option><option value="view" ${cur==="view"?"selected":""}>view</option><option value="edit" ${cur==="edit"?"selected":""}>edit</option></select></td>`;
-      }).join("") + "</tr>").join("") + "</tbody>";
-  document.querySelectorAll("#accGrid select").forEach(s => s.onchange = async () => {
+  $("accGrid").innerHTML = `<thead><tr><th>User</th><th>Role</th>${cols.map(m => `<th>${esc(m.name)}</th>`).join("")}</tr></thead><tbody>` +
+    users.map(u => {
+      const isSup = u.role === "admin";
+      return `<tr><td>${esc(u.full_name)}<div style="font-size:11px;color:var(--muted)">${esc(u.email || "")}</div></td>
+      <td>${ctx.isSuper && !isSup ? `<select data-role="${u.id}"><option value="rm" ${u.role==="rm"?"selected":""}>Coordinator</option><option value="manager" ${u.role==="manager"?"selected":""}>Admin</option></select>` : (isSup ? "Super admin" : u.role === "manager" ? "Admin" : "Coordinator")}</td>` +
+      cols.map(m => {
+        if (isSup) return `<td style="color:var(--muted)">all</td>`;
+        const g = userModules.find(x => x.user_id === u.id && x.module === m.key) || {};
+        const cur = g.level || "";
+        return `<td><select data-u="${u.id}" data-m="${m.key}"><option value="">— none —</option><option value="view" ${cur==="view"?"selected":""}>view</option><option value="edit" ${cur==="edit"?"selected":""}>edit</option>${ctx.isSuper ? `<option value="admin" ${cur==="admin"?"selected":""}>admin</option>` : ""}</select>
+          <label style="display:block;font-size:10px;color:var(--muted);margin-top:2px;${cur ? "" : "visibility:hidden"}"><input type="checkbox" data-rv="${u.id}" data-m="${m.key}" ${g.can_reveal ? "checked" : ""} style="width:auto"> reveal</label></td>`;
+      }).join("") + "</tr>"; }).join("") + "</tbody>";
+  document.querySelectorAll("#accGrid select[data-u]").forEach(s => s.onchange = async () => {
     const { u, m } = s.dataset, level = s.value;
+    const prev = userModules.find(x => x.user_id === u && x.module === m) || {};
     let r;
     if (!level) r = await sb.from("user_modules").delete().eq("user_id", u).eq("module", m);
-    else r = await sb.from("user_modules").upsert({ user_id: u, module: m, level }, { onConflict: "user_id,module" });
+    else r = await sb.from("user_modules").upsert({ user_id: u, module: m, level, can_reveal: !!prev.can_reveal }, { onConflict: "user_id,module" });
     if (r.error){ alert("Could not save: " + r.error.message); return; }
-    userModules = userModules.filter(x => !(x.user_id === u && x.module === m)); if (level) userModules.push({ user_id: u, module: m, level });
-    toast("Access updated ✓");
+    userModules = userModules.filter(x => !(x.user_id === u && x.module === m)); if (level) userModules.push({ user_id: u, module: m, level, can_reveal: !!prev.can_reveal });
+    renderAccess(); toast("Access updated ✓");
+  });
+  document.querySelectorAll("#accGrid input[data-rv]").forEach(c => c.onchange = async () => {
+    const u = c.dataset.rv, m = c.dataset.m;
+    const g = userModules.find(x => x.user_id === u && x.module === m); if (!g){ c.checked = false; return; }
+    const r = await sb.from("user_modules").update({ can_reveal: c.checked }).eq("user_id", u).eq("module", m);
+    if (r.error){ alert(r.error.message); c.checked = !c.checked; return; }
+    g.can_reveal = c.checked; toast(c.checked ? "Can reveal secrets ✓" : "Reveal removed");
+  });
+  document.querySelectorAll("#accGrid select[data-role]").forEach(s => s.onchange = async () => {
+    try { await adminCall({ action: "update", id: s.dataset.role, full_name: ctx.profiles.find(p => p.id === s.dataset.role).full_name, role: s.value }); await reloadProfiles(); toast("Role updated ✓"); }
+    catch (e){ alert("Failed: " + e.message); }
   });
 }
 
@@ -126,7 +147,7 @@ async function adminCall(body){
 async function reloadProfiles(){ ctx.profiles = await fetchAll("profiles", "id, full_name, role, email"); renderUsers(); renderAccess(); }
 function renderUsers(){
   $("usersRows").innerHTML = ctx.profiles.slice().sort((a,b) => a.full_name.localeCompare(b.full_name)).map(p => `<tr>
-    <td>${esc(p.full_name)}</td><td>${esc(p.email || "")}</td><td>${({ admin: "Super admin", manager: "Manager", rm: "User" })[p.role] || p.role}</td>
+    <td>${esc(p.full_name)}</td><td>${esc(p.email || "")}</td><td>${({ admin: "Super admin", manager: "Admin", rm: "Coordinator" })[p.role] || p.role}</td>
     <td style="white-space:nowrap">${ctx.isSuper ? `<button class="btn ghost small" data-u="pw" data-id="${p.id}">Reset password</button>
     <button class="btn ghost small" data-u="edit" data-id="${p.id}">Edit</button>
     ${p.id === ctx.me.id ? "" : `<button class="btn ghost small" data-u="del" data-id="${p.id}" style="color:var(--warn);border-color:var(--warn)">Remove</button>`}` : ""}</td></tr>`).join("");

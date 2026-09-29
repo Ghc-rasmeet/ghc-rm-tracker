@@ -134,14 +134,14 @@
 <script>
 let ctx, types = [], iclients = [], policies = [], nominees = [], members = [], files = [], touchClients = [];
 let filter = { q: "", type: "", kind: "", stat: "all", sort: "due", dir: 1 }, page = 1, pageSize = 100, editingId = null, openId = null;
-const canEdit = () => ctx.level === "edit";
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
 
 (async () => {
   ctx = await requireAuth("insurance"); if (!ctx) return;
   shellHeader("Insurance", ctx);
   await load();
   $("app").classList.remove("hidden");
-  if (ctx.isMgr){ $("typesBtn").classList.remove("hidden"); $("filesBtn").classList.remove("hidden"); }
+  if (ctx.isSuper || ctx.level === "admin"){ $("typesBtn").classList.remove("hidden"); $("filesBtn").classList.remove("hidden"); }
   if (!canEdit()){ $("newBtn").classList.add("hidden"); }
   render();
 })();
@@ -261,7 +261,7 @@ async function openPolicy(id){
 }
 function renderDocs(cid){
   const list = files.filter(f => f.ins_client_id === cid), shown = ctx.isMgr ? list : list.slice(0, 3);
-  $("docNote").textContent = ctx.isMgr ? `(${list.length})` : `(last 3 of ${list.length})`;
+  $("docNote").textContent = (ctx.isSuper || ctx.level === "admin") ? `(${list.length})` : `(last 3 of ${list.length})`;
   $("docList").innerHTML = shown.length ? shown.map(f => `<li><span>${esc(f.file_name)} <span style="color:var(--muted)">· ${new Date(f.uploaded_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span></span><a href="#" data-dl="${f.path}">Download</a></li>`).join("") : `<li style="color:var(--muted)">No documents.</li>`;
   document.querySelectorAll("[data-dl]").forEach(a => a.onclick = async e => { e.preventDefault(); const { data, error } = await sb.storage.from("policies").createSignedUrl(a.dataset.dl, 300); if (error){ toast("Could not get file: " + error.message); return; } window.open(data.signedUrl, "_blank"); });
 }

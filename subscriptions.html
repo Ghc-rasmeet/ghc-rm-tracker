@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Subscriptions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="band">
+      <div class="grp"><div class="rvhead">Subscriptions</div><div class="stats" id="stats"></div></div>
+      <div class="grp"><div class="rvhead">Spend</div><div class="stats" id="spend"></div>
+        <div class="fml">Monthly figure is each active subscription converted to a per-month cost</div></div>
+    </div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search name, email, phone, bank, narration">
+      <select id="fCat" style="width:auto"><option value="">All categories</option><option value="personal">Personal</option><option value="professional">Professional</option><option value="both">Both</option></select>
+      <select id="fMode" style="width:auto"><option value="">All payment modes</option></select>
+      <select id="fStatus" style="width:auto"><option value="active">Active</option><option value="cancelled">Cancelled</option><option value="">All</option></select>
+      <button class="btn ghost small" id="clearF">Clear ×</button>
+      <button class="btn small" id="newBtn">+ New subscription</button>
+      <button class="btn ghost small" id="repBtn">Spend report</button>
+    </div>
+
+    <div class="pager" id="pagerTop"></div>
+    <div class="tablewrap">
+      <table id="tbl"><thead><tr>
+        <th class="sort" data-k="name">Subscription</th><th class="sort" data-k="cat">Category</th>
+        <th class="sort" data-k="amt">Amount</th><th class="sort" data-k="mon">Per month</th>
+        <th class="sort" data-k="start">Start</th><th class="sort" data-k="end">Renews / ends</th>
+        <th class="sort" data-k="renew">Renewal</th><th class="sort" data-k="mode">Paid by</th><th class="side">Status</th>
+      </tr></thead><tbody id="rows"></tbody></table>
+      <div class="empty hidden" id="empty">Nothing here yet.</div>
+    </div>
+    <div class="pager" id="pagerBot"></div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle">New subscription</h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody">
+    <div class="grid2">
+      <div style="grid-column:1/-1"><label>Subscription name</label><input id="sName" placeholder="e.g. Zoho One, Canva Pro"></div>
+      <div><label>Category</label><select id="sCat"><option value="professional">Professional</option><option value="personal">Personal</option><option value="both">Both</option></select></div>
+      <div><label>Payment mode</label><select id="sMode"><option value="">— select —</option><option>credit card</option><option>debit card</option><option>UPI</option><option>net banking</option><option>cash</option><option>other</option></select></div>
+      <div><label>Amount</label><input id="sAmt" type="number" min="0"></div>
+      <div><label>Billing cycle</label><select id="sCycle"><option>monthly</option><option>quarterly</option><option>half-yearly</option><option value="yearly" selected>yearly</option><option>one-time</option></select></div>
+      <div><label>Start date</label><input id="sStart" type="date"></div>
+      <div><label>End / renewal date</label><input id="sEnd" type="date"></div>
+      <div><label>Renewal</label><select id="sAuto"><option value="true">Auto-renews</option><option value="false">Manual</option></select></div>
+      <div><label>Phone</label><input id="sPhone"></div>
+      <div><label>Bank name</label><input id="sBank"></div>
+      <div><label>Bank account / card</label><input id="sAcc" placeholder="last 4 digits are enough"></div>
+    </div>
+
+    <h3 style="margin-top:18px">Login details
+      <label class="toggle" style="display:inline-flex;margin-left:10px;font-weight:400"><input type="checkbox" id="sSensitive"> hide from coordinators</label>
+    </h3>
+    <div class="grid2">
+      <div><label>Email attached</label><input id="sEmail" type="email"></div>
+      <div><label>Username</label><input id="sUser"></div>
+      <div style="grid-column:1/-1"><label>Password</label><div style="display:flex;gap:8px"><input id="sPass" type="password"><button class="btn ghost small" id="sShow" type="button">Show</button></div></div>
+    </div>
+    <div id="lockNote" class="hidden" style="font-size:12px;color:var(--muted);margin-top:4px">Hidden — only people with reveal rights can see these.</div>
+
+    <label>Link</label><input id="sLink" placeholder="https://">
+    <label>Narration</label><textarea id="sNote" rows="3"></textarea>
+    <div class="err" id="sErr"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+      <button class="btn" id="sSave">Save</button>
+      <button class="btn ghost" id="sRenew" style="display:none">Renew</button>
+      <button class="btn ghost" id="sCancel" style="display:none;color:var(--warn);border-color:var(--warn)">Cancel subscription</button>
+      <button class="btn blue" id="sRestore" style="display:none">Reactivate</button>
+    </div>
+
+    <div id="cancelBox" class="hidden" style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fbecec">
+      <b style="color:var(--warn)">Cancelled</b>
+      <div class="kv" style="margin-top:6px"><div>Cancelled on</div><div id="cOn"></div><div>Reason</div><div id="cWhy"></div></div>
+    </div>
+
+    <h3 style="margin-top:22px">History</h3>
+    <ul class="hist" id="sHist"></ul>
+  </div>
+</aside>
+
+<div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:760px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Spend report</h2>
+      <select id="rBy" style="width:auto"><option value="category">By category</option><option value="pay_mode">By payment mode</option><option value="cycle">By billing cycle</option></select>
+      <button class="btn ghost small" id="rXls">Export</button><button class="x" id="rClose">×</button></div>
+    <div class="fml" style="margin:8px 0">Active subscriptions only · yearly figure = per-month × 12</div>
+    <div class="tablewrap"><table id="rTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<script>
+let ctx, subs = [], logs = [];
+let filter = { q: "", cat: "", mode: "", status: "active", sort: "end", dir: 1 }, page = 1, pageSize = 100, editingId = null;
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+const CYCLE_MONTHS = { "monthly": 1, "quarterly": 3, "half-yearly": 6, "yearly": 12, "one-time": 0 };
+const perMonth = s => { const m = CYCLE_MONTHS[s.cycle] ?? 12; return m ? (+s.amount || 0) / m : 0; };
+
+(async () => {
+  ctx = await requireAuth("subs"); if (!ctx) return;
+  shellHeader("Subscriptions", ctx);
+  await load();
+  $("app").classList.remove("hidden");
+  if (!canEdit()) $("newBtn").classList.add("hidden");
+  render();
+})();
+
+async function load(){
+  subs = await fetchAll("subs_safe", "*", { col: "end_date" });
+  logs = await fetchAll("subs_log", "id, sub_id, action, start_date, end_date, amount, note, by_user, logged_at", { col: "logged_at", asc: false });
+  $("fMode").innerHTML = `<option value="">All payment modes</option>` + [...new Set(subs.map(s => s.pay_mode).filter(Boolean))].sort().map(m => `<option>${esc(m)}</option>`).join("");
+}
+
+function render(){
+  const t = today(), d7 = addDays(t, 7), d30 = addDays(t, 30);
+  const act = subs.filter(s => s.status === "active");
+  const tile = (k, l, v, cls = "") => `<div class="stat ${cls} ${filter.stat===k?"active":""}" data-k="${k}"><b>${v}</b><span>${l}</span></div>`;
+  $("stats").innerHTML = tile("active","Active",act.length) +
+    tile("due7","Due in 7 days",act.filter(s => s.end_date && s.end_date >= t && s.end_date <= d7).length,"red") +
+    tile("due30","Due in 30 days",act.filter(s => s.end_date && s.end_date >= t && s.end_date <= d30).length,"amb") +
+    tile("lapsed","Past due",act.filter(s => s.end_date && s.end_date < t).length,"mag") +
+    tile("both","In both",act.filter(s => s.category === "both").length) +
+    tile("cancelled","Cancelled",subs.filter(s => s.status === "cancelled").length);
+  const mon = act.reduce((x, s) => x + perMonth(s), 0);
+  $("spend").innerHTML = tile("x","Per month",inr(mon),"pct") + tile("x","Per year",inr(mon * 12),"pct") +
+    tile("x","Professional",inr(act.filter(s => s.category !== "personal").reduce((x, s) => x + perMonth(s), 0)),"grn") +
+    tile("x","Personal",inr(act.filter(s => s.category !== "professional").reduce((x, s) => x + perMonth(s), 0)),"grn");
+  document.querySelectorAll(".stat[data-k]").forEach(el => el.onclick = () => {
+    const k = el.dataset.k; if (k === "x") return;
+    filter.stat = filter.stat === k ? "" : k;
+    if (k === "cancelled"){ filter.status = "cancelled"; $("fStatus").value = "cancelled"; } else { filter.status = "active"; $("fStatus").value = "active"; }
+    page = 1; render();
+  });
+
+  let rows = subs.slice();
+  if (filter.status) rows = rows.filter(s => s.status === filter.status);
+  if (filter.stat === "due7") rows = rows.filter(s => s.end_date && s.end_date >= t && s.end_date <= d7);
+  if (filter.stat === "due30") rows = rows.filter(s => s.end_date && s.end_date >= t && s.end_date <= d30);
+  if (filter.stat === "lapsed") rows = rows.filter(s => s.end_date && s.end_date < t);
+  if (filter.stat === "both") rows = rows.filter(s => s.category === "both");
+  if (filter.cat) rows = rows.filter(s => s.category === filter.cat);
+  if (filter.mode) rows = rows.filter(s => s.pay_mode === filter.mode);
+  const q = filter.q.toLowerCase();
+  if (q) rows = rows.filter(s => [s.name, s.email, s.phone, s.bank_name, s.narration, s.username].some(v => (v || "").toLowerCase().includes(q)));
+  const key = s => ({ name: (s.name || "").toLowerCase(), cat: s.category, amt: +s.amount || 0, mon: perMonth(s), start: s.start_date || null, end: s.end_date || null, renew: s.auto_renew ? 1 : 0, mode: s.pay_mode || null })[filter.sort];
+  rows.sort((a,b) => { const ka = key(a), kb = key(b); if (ka == null && kb == null) return 0; if (ka == null) return 1; if (kb == null) return -1; return ka < kb ? -filter.dir : ka > kb ? filter.dir : 0; });
+  document.querySelectorAll("th.sort").forEach(th => { th.classList.toggle("on", th.dataset.k === filter.sort); th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === filter.sort ? (filter.dir === 1 ? " ▲" : " ▼") : ""); th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); }; });
+
+  const total = rows.length, pages = Math.max(1, Math.ceil(total / pageSize)); if (page > pages) page = pages;
+  const from = (page - 1) * pageSize, to = Math.min(total, from + pageSize);
+  const pg = `<span>${total ? from + 1 : 0}–${to} of ${total}</span><button class="btn ghost small" data-pg="prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button><span>Page ${page} / ${pages}</span><button class="btn ghost small" data-pg="next" ${page >= pages ? "disabled" : ""}>Next ›</button>`;
+  $("pagerTop").innerHTML = pg; $("pagerBot").innerHTML = pg;
+  document.querySelectorAll("[data-pg=prev]").forEach(b => b.onclick = () => { page--; render(); }); document.querySelectorAll("[data-pg=next]").forEach(b => b.onclick = () => { page++; render(); });
+
+  $("rows").innerHTML = rows.slice(from, to).map(s => {
+    const due = s.end_date && s.status === "active" ? (s.end_date < t ? "mag" : s.end_date <= d7 ? "red" : s.end_date <= d30 ? "hot" : "talk") : "talk";
+    return `<tr class="row" data-id="${s.id}">
+      <td><div>${esc(s.name)}${s.sensitive ? ' <span class="pill cold" title="login hidden">🔒</span>' : ""}</div>${s.link ? `<div style="font-size:11px"><a href="${esc(s.link)}" target="_blank" onclick="event.stopPropagation()">open</a></div>` : ""}</td>
+      <td><span class="pill ${s.category === "both" ? "admin" : s.category === "personal" ? "talk" : "done"}">${s.category}</span></td>
+      <td>${inr(s.amount)}<div style="font-size:11px;color:var(--muted)">${esc(s.cycle || "")}</div></td>
+      <td>${inr(Math.round(perMonth(s)))}</td>
+      <td>${fmtY(s.start_date)}</td>
+      <td><span class="pill ${due}">${fmtY(s.end_date)}</span></td>
+      <td>${s.auto_renew ? '<span class="pill done">auto</span>' : '<span class="pill hot">manual</span>'}</td>
+      <td>${esc(s.pay_mode || "")}<div style="font-size:11px;color:var(--muted)">${esc(s.bank_name || "")}</div></td>
+      <td class="side">${s.status === "active" ? '<span class="pill done">active</span>' : '<span class="pill cold">cancelled</span>'}</td></tr>`;
+  }).join("");
+  $("empty").classList.toggle("hidden", rows.length > 0);
+  document.querySelectorAll("tr.row").forEach(el => el.onclick = () => openSub(el.dataset.id));
+}
+$("q").oninput = e => { filter.q = e.target.value; page = 1; render(); };
+$("fCat").onchange = e => { filter.cat = e.target.value; page = 1; render(); };
+$("fMode").onchange = e => { filter.mode = e.target.value; page = 1; render(); };
+$("fStatus").onchange = e => { filter.status = e.target.value; filter.stat = ""; page = 1; render(); };
+$("clearF").onclick = () => { filter = { ...filter, q: "", cat: "", mode: "", stat: "", status: "active" }; $("q").value = ""; $("fCat").value = ""; $("fMode").value = ""; $("fStatus").value = "active"; page = 1; render(); };
+
+/* ---- drawer ---- */
+function fill(s){
+  $("sName").value = s?.name || ""; $("sCat").value = s?.category || "professional"; $("sMode").value = s?.pay_mode || "";
+  $("sAmt").value = s?.amount ?? ""; $("sCycle").value = s?.cycle || "yearly"; $("sStart").value = s?.start_date || "";
+  $("sEnd").value = s?.end_date || ""; $("sAuto").value = String(s?.auto_renew ?? true); $("sPhone").value = s?.phone || "";
+  $("sBank").value = s?.bank_name || ""; $("sAcc").value = s?.bank_account || ""; $("sSensitive").checked = !!s?.sensitive;
+  const locked = s && s.sensitive && !ctx.canReveal;
+  $("sEmail").value = locked ? "••••••••" : (s?.email || ""); $("sUser").value = locked ? "••••••••" : (s?.username || "");
+  $("sPass").value = locked ? "••••••••" : (s?.password || ""); $("sPass").type = "password";
+  [$("sEmail"), $("sUser"), $("sPass"), $("sSensitive"), $("sShow")].forEach(el => el.disabled = locked);
+  $("lockNote").classList.toggle("hidden", !locked);
+  $("sLink").value = s?.link || ""; $("sNote").value = s?.narration || ""; $("sErr").textContent = "";
+  document.querySelectorAll("#drawer input, #drawer select, #drawer textarea").forEach(i => { if (!locked || !["sEmail","sUser","sPass","sSensitive"].includes(i.id)) i.disabled = !canEdit(); });
+  $("sSave").style.display = canEdit() ? "" : "none";
+  $("sCancel").style.display = canEdit() && s && s.status === "active" ? "" : "none";
+  $("sRenew").style.display = canEdit() && s && s.status === "active" ? "" : "none";
+  $("sRestore").style.display = canEdit() && s && s.status === "cancelled" ? "" : "none";
+  $("cancelBox").classList.toggle("hidden", !(s && s.status === "cancelled"));
+  if (s && s.status === "cancelled"){ $("cOn").textContent = fmtY(s.cancelled_on); $("cWhy").textContent = s.cancel_reason || "—"; }
+  $("sHist").innerHTML = s ? (logs.filter(l => l.sub_id === s.id).map(l => {
+    const by = (ctx.profiles.find(p => p.id === l.by_user) || {}).full_name || "";
+    return `<li><div class="d">${new Date(l.logged_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})} · <span class="pill ${l.action === "cancelled" ? "cold" : "done"}">${esc(l.action)}</span>${l.amount != null ? " · " + inr(l.amount) : ""}${l.end_date ? " · till " + fmtY(l.end_date) : ""} <span style="color:var(--muted)">${esc(by)}</span></div>${l.note ? `<div class="n">${esc(l.note)}</div>` : ""}</li>`;
+  }).join("") || `<li style="color:var(--muted)">No history yet.</li>`) : "";
+}
+$("sShow").onclick = () => { const p = $("sPass"); p.type = p.type === "password" ? "text" : "password"; $("sShow").textContent = p.type === "password" ? "Show" : "Hide"; };
+$("newBtn").onclick = () => { editingId = null; $("dTitle").textContent = "New subscription"; $("dMeta").textContent = ""; fill(null); $("sSave").textContent = "Save"; show(); };
+function openSub(id){ const s = subs.find(x => x.id === id); if (!s) return; editingId = id;
+  $("dTitle").textContent = s.name; $("dMeta").textContent = `${s.category} · ${s.cycle} · ${inr(s.amount)}`; fill(s); $("sSave").textContent = "Update"; show(); }
+function show(){ $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0; }
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+
+function formRec(){
+  const cur = subs.find(s => s.id === editingId);
+  const locked = cur && cur.sensitive && !ctx.canReveal;
+  const r = { name: $("sName").value.trim(), category: $("sCat").value, pay_mode: $("sMode").value || null,
+    amount: $("sAmt").value === "" ? null : +$("sAmt").value, cycle: $("sCycle").value,
+    start_date: $("sStart").value || null, end_date: $("sEnd").value || null, auto_renew: $("sAuto").value === "true",
+    phone: $("sPhone").value.trim() || null, bank_name: $("sBank").value.trim() || null, bank_account: $("sAcc").value.trim() || null,
+    link: $("sLink").value.trim() || null, narration: $("sNote").value.trim() || null };
+  if (!locked){ r.email = $("sEmail").value.trim() || null; r.username = $("sUser").value.trim() || null; r.password = $("sPass").value || null; r.sensitive = $("sSensitive").checked; }
+  return r;
+}
+$("sSave").onclick = async () => {
+  $("sErr").textContent = "";
+  const rec = formRec(); if (!rec.name){ $("sErr").textContent = "Name is required."; return; }
+  $("sSave").disabled = true;
+  try {
+    if (editingId){ const r = await sb.from("subs").update(rec).eq("id", editingId); if (r.error) throw r.error;
+      await sb.from("subs_log").insert({ sub_id: editingId, action: "edited", amount: rec.amount, end_date: rec.end_date, by_user: ctx.me.id }); }
+    else { const r = await sb.from("subs").insert({ ...rec, created_by: ctx.me.id }).select("id").single(); if (r.error) throw r.error;
+      await sb.from("subs_log").insert({ sub_id: r.data.id, action: "added", amount: rec.amount, start_date: rec.start_date, end_date: rec.end_date, by_user: ctx.me.id }); }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  } catch (e){ $("sErr").textContent = "Could not save: " + e.message; }
+  $("sSave").disabled = false;
+};
+$("sCancel").onclick = async () => {
+  const why = prompt("Why is it being cancelled?"); if (why === null) return;
+  const on = prompt("Cancelled on (YYYY-MM-DD):", today()); if (!on) return;
+  const r = await sb.from("subs").update({ status: "cancelled", cancelled_on: on, cancel_reason: why || null, auto_renew: false }).eq("id", editingId);
+  if (r.error){ toast(r.error.message); return; }
+  await sb.from("subs_log").insert({ sub_id: editingId, action: "cancelled", note: why || null, by_user: ctx.me.id });
+  await load(); closeDrawer(); render(); toast("Cancelled");
+};
+$("sRestore").onclick = async () => {
+  const st = prompt("New start date (YYYY-MM-DD):", today()); if (!st) return;
+  const en = prompt("New end / renewal date (YYYY-MM-DD):"); if (!en) return;
+  const r = await sb.from("subs").update({ status: "active", start_date: st, end_date: en, cancelled_on: null, cancel_reason: null }).eq("id", editingId);
+  if (r.error){ toast(r.error.message); return; }
+  await sb.from("subs_log").insert({ sub_id: editingId, action: "reactivated", start_date: st, end_date: en, by_user: ctx.me.id });
+  await load(); closeDrawer(); render(); toast("Reactivated ✓");
+};
+$("sRenew").onclick = async () => {
+  const s = subs.find(x => x.id === editingId); if (!s) return;
+  const months = CYCLE_MONTHS[s.cycle] || 12;
+  let next = s.end_date || today();
+  const d = new Date(next + "T00:00:00"); d.setMonth(d.getMonth() + months);
+  const suggest = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const en = prompt("Renewed until (YYYY-MM-DD):", suggest); if (!en) return;
+  const amt = prompt("Amount paid:", s.amount ?? ""); if (amt === null) return;
+  const r = await sb.from("subs").update({ start_date: s.end_date || today(), end_date: en, amount: amt === "" ? s.amount : +amt }).eq("id", editingId);
+  if (r.error){ toast(r.error.message); return; }
+  await sb.from("subs_log").insert({ sub_id: editingId, action: "renewed", start_date: s.end_date, end_date: en, amount: amt === "" ? s.amount : +amt, by_user: ctx.me.id });
+  await load(); closeDrawer(); render(); toast("Renewed ✓");
+};
+
+/* ---- report ---- */
+let repRows = [];
+$("repBtn").onclick = () => { runRep(); $("repModal").classList.remove("hidden"); };
+$("rClose").onclick = () => $("repModal").classList.add("hidden");
+$("rBy").onchange = runRep;
+function runRep(){
+  const by = $("rBy").value, act = subs.filter(s => s.status === "active");
+  const keys = [...new Set(act.map(s => s[by] || "—"))].sort();
+  repRows = keys.map(k => { const a = act.filter(s => (s[by] || "—") === k); const m = a.reduce((x, s) => x + perMonth(s), 0);
+    return { [by === "pay_mode" ? "Payment mode" : by === "cycle" ? "Billing cycle" : "Category"]: k, Count: a.length, "Per month": Math.round(m), "Per year": Math.round(m * 12) }; });
+  const tot = repRows.reduce((s, r) => ({ Count: s.Count + r.Count, m: s.m + r["Per month"] }), { Count: 0, m: 0 });
+  const label = Object.keys(repRows[0] || { X: 1 })[0];
+  repRows.push({ [label]: "TOTAL", Count: tot.Count, "Per month": tot.m, "Per year": tot.m * 12 });
+  const cols = Object.keys(repRows[0]);
+  $("rTable").innerHTML = `<thead><tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${repRows.map(r => `<tr${r[label] === "TOTAL" ? ' style="font-weight:600;background:#f0f2ef"' : ""}>${cols.map(c => `<td>${c.startsWith("Per") ? inr(r[c]) : esc(String(r[c]))}</td>`).join("")}</tr>`).join("")}</tbody>`;
+}
+$("rXls").onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), "Spend"); XLSX.writeFile(wb, `GHC_subscriptions_${today()}.xlsx`); };
+</script>
+</body>
+</html>
