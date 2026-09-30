@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Student Fee Tracking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="band">
+      <div class="grp"><div class="rvhead">Students</div><div class="stats" id="stats"></div></div>
+      <div class="grp"><div class="rvhead">Money</div><div class="stats" id="money"></div>
+        <div class="fml">Total received = Received 1 + 2 + 3 + relationship discount · Balance due = Final fees − total received</div></div>
+    </div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search student, ID, phone, source reference">
+      <select id="fCourse" style="width:auto"><option value="">All courses</option></select>
+      <select id="fRm" style="width:auto"><option value="">All RMs</option></select>
+      <select id="fQtr" style="width:auto"><option value="">All quarters</option></select>
+      <button class="btn ghost small" id="clearF">Clear ×</button>
+      <button class="btn small" id="newBtn">+ New student</button>
+      <span class="tools">
+        <button class="btn ghost small" id="repBtn">Reports</button>
+        <button class="btn ghost small" id="logBtn">Change log</button>
+        <button class="btn ghost small" id="xlsBtn">Export</button>
+        <button class="btn ghost small hidden" id="listBtn">Lists</button>
+        <button class="btn ghost small hidden" id="permBtn">Field access</button>
+      </span>
+    </div>
+
+    <div class="pager" id="pagerTop"></div>
+    <div class="tablewrap"><table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="rows"></tbody></table>
+      <div class="empty hidden" id="empty">No students yet.</div></div>
+    <div class="pager" id="pagerBot"></div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle">New student</h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody">
+    <div id="form"></div>
+    <div id="calcBox" style="margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#eef3f8">
+      <div class="kv">
+        <div>Total received</div><div id="cTotal">—</div>
+        <div>Balance due</div><div id="cBal">—</div>
+        <div>Clearance</div><div id="cClear">—</div>
+      </div>
+    </div>
+    <div class="err" id="fErr"></div>
+    <div style="display:flex;gap:10px;margin-top:8px"><button class="btn" id="fSave">Save</button></div>
+    <div id="recLog"><h3 style="margin-top:24px">This student's history</h3><ul class="hist" id="recLogList"></ul></div>
+  </div>
+</aside>
+
+<div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:900px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Reports</h2>
+      <select id="repSel" style="width:auto"></select>
+      <button class="btn ghost small" id="repXls">Export</button><button class="x" id="repClose">×</button></div>
+    <div class="tablewrap" style="margin-top:10px"><table id="repTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<div id="logModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:900px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Change log</h2>
+      <input id="logQ" placeholder="filter by student or person" style="width:auto"><button class="x" id="logClose">×</button></div>
+    <div class="tablewrap" style="margin-top:10px"><table id="logTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<div id="listModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:560px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Dropdown lists</h2>
+      <select id="listSel" style="width:auto"></select><button class="x" id="listClose">×</button></div>
+    <ul id="listItems" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="listNew" placeholder="Add a new option"><button class="btn small" id="listAdd">Add</button></div>
+  </div>
+</div>
+
+<div id="permModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:1000px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Field access</h2>
+      <select id="permUser" style="width:auto"></select><button class="x" id="permClose">×</button></div>
+    <div class="fml" style="margin:8px 0">Everyone starts with full access. Record only the exceptions.</div>
+    <div class="tablewrap"><table class="grid-acc" id="permGrid" style="font-size:13px"></table></div>
+    <h3 style="font-size:14px;margin:18px 0 6px">Reports and actions</h3>
+    <div class="tablewrap"><table class="grid-acc" id="featGrid" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<script>
+const FIELDS = [{"k": "student_id", "l": "Student ID", "t": "text", "g": "Student"}, {"k": "course_id", "l": "Course ID", "t": "text", "g": "Student"}, {"k": "student_name", "l": "Student Name", "t": "text", "g": "Student"}, {"k": "phone_no", "l": "Phone No", "t": "phone", "g": "Student"}, {"k": "main_course", "l": "Main Course", "t": "list:course", "g": "Course"}, {"k": "source", "l": "Source", "t": "list:source", "g": "Course"}, {"k": "source_reference", "l": "Source Reference", "t": "text", "g": "Course"}, {"k": "mode_of_connect", "l": "Mode of connect", "t": "text", "g": "Course"}, {"k": "reg_quarter", "l": "Registration Quarter", "t": "list:quarter", "g": "Course"}, {"k": "actual_fees", "l": "Actual Fees", "t": "number", "g": "Fees"}, {"k": "final_fees", "l": "Final Fees", "t": "number", "g": "Fees"}, {"k": "collection_date_1", "l": "Collection Date 1", "t": "date", "g": "Instalment 1"}, {"k": "received_1", "l": "Received 1", "t": "number", "g": "Instalment 1"}, {"k": "status_1", "l": "Mode & Confirmation (1)", "t": "list:paystatus", "g": "Instalment 1"}, {"k": "collection_date_2", "l": "Collection Date 2", "t": "date", "g": "Instalment 2"}, {"k": "received_2", "l": "Received 2", "t": "number", "g": "Instalment 2"}, {"k": "status_2", "l": "Mode & Confirmation (2)", "t": "list:paystatus", "g": "Instalment 2"}, {"k": "collection_date_3", "l": "Collection Date 3", "t": "date", "g": "Instalment 3"}, {"k": "received_3", "l": "Received 3", "t": "number", "g": "Instalment 3"}, {"k": "status_3", "l": "Mode & Confirmation (3)", "t": "list:paystatus", "g": "Instalment 3"}, {"k": "relationship_discount", "l": "Relationship Discount", "t": "number", "g": "Adjustment"}, {"k": "discount_reason", "l": "Discount Reason", "t": "list:discount", "g": "Adjustment"}, {"k": "rm", "l": "RM", "t": "list:rm", "g": "Ownership"}, {"k": "bs_intro", "l": "Build Specialist \u2013 Intro", "t": "list:bsintro", "g": "Ownership"}, {"k": "bs_deep", "l": "Build Specialist \u2013 Deep", "t": "list:bsdeep", "g": "Ownership"}, {"k": "support", "l": "Support", "t": "list:yesno", "g": "Ownership"}, {"k": "internal_support", "l": "Internal Support", "t": "list:yesno", "g": "Ownership"}];
+const GROUPS = ["Student", "Course", "Fees", "Instalment 1", "Instalment 2", "Instalment 3", "Adjustment", "Ownership"];
+const MOD = "supp_fee";
+const NUMS = ["actual_fees","final_fees","received_1","received_2","received_3","relationship_discount"];
+const LIST_LABELS = { course:"Main course", source:"Source", quarter:"Quarter", paystatus:"Mode & confirmation", discount:"Discount reason", rm:"RM", bsintro:"Build Specialist – Intro", bsdeep:"Build Specialist – Deep", yesno:"Yes / No" };
+let ctx, rows = [], logs = [], lookups = [], fperm = {}, feat = {}, allPerms = [], allFeatPerms = [];
+let filter = { q: "", course: "", rm: "", qtr: "", stat: "", sort: "student_name", dir: 1 }, page = 1, pageSize = 100, editingId = null;
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+const P = k => ctx.isSuper ? "edit" : (fperm[k] || (canEdit() ? "edit" : "view"));
+const F = k => ctx.isSuper ? true : (feat[k] !== undefined ? feat[k] : true);
+const opts = key => lookups.filter(l => l.list_key === key && l.active).sort((a,b) => a.sort - b.sort).map(l => l.value);
+const LIST = ["student_name","main_course","reg_quarter","final_fees","total_received","balance_due","clearance_status","rm","source"];
+
+(async () => {
+  ctx = await requireAuth(MOD); if (!ctx) return;
+  shellHeader("Student Fee Tracking", ctx);
+  await load();
+  $("app").classList.remove("hidden");
+  if (!canEdit()) $("newBtn").classList.add("hidden");
+  if (ctx.isSuper || ctx.level === "admin"){ $("permBtn").classList.remove("hidden"); }
+  if (F("manage_lists") && (ctx.isSuper || ctx.level === "admin")) $("listBtn").classList.remove("hidden");
+  if (!F("view_log")) $("logBtn").classList.add("hidden");
+  if (!F("export")) $("xlsBtn").classList.add("hidden");
+  render();
+})();
+
+async function load(){
+  try { (await fetchAll("field_perms","module, field_key, user_id, level")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) fperm[r.field_key] = r.level; allPerms.push(r); }); } catch (e){}
+  try { (await fetchAll("feature_perms","module, feature_key, user_id, allowed")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) feat[r.feature_key] = r.allowed; allFeatPerms.push(r); }); } catch (e){}
+  lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === MOD);
+  rows = await fetchAll("fee_view", "*");
+  if (F("view_log")){ try { logs = await fetchAll("fee_log","*",{ col: "at", asc: false }); } catch (e){ logs = []; } }
+  $("fCourse").innerHTML = `<option value="">All courses</option>` + opts("course").map(o => `<option>${esc(o)}</option>`).join("");
+  $("fRm").innerHTML = `<option value="">All RMs</option>` + opts("rm").map(o => `<option>${esc(o)}</option>`).join("");
+  const qs = [...new Set(rows.map(r => r.clearance_quarter).filter(Boolean))].sort();
+  $("fQtr").innerHTML = `<option value="">All clearance quarters</option>` + qs.map(o => `<option>${esc(o)}</option>`).join("");
+}
+
+function render(){
+  const cols = LIST.filter(k => !FIELDS.find(f => f.k === k) || P(k) !== "hidden");
+  $("thead").innerHTML = cols.map(k => { const f = FIELDS.find(x => x.k === k);
+    const l = f ? f.l : ({ total_received: "Total received", balance_due: "Balance due", clearance_status: "Clearance" })[k] || k;
+    return `<th class="sort" data-k="${k}">${esc(l)}</th>`; }).join("");
+  const tile = (k, l, v, cls = "") => `<div class="stat ${cls} ${filter.stat===k?"active":""}" data-k="${k}"><b>${v}</b><span>${l}</span></div>`;
+  const sum = (a, k) => a.reduce((x, r) => x + (+r[k] || 0), 0);
+  $("stats").innerHTML = tile("all","Students",rows.length) +
+    tile("pending","Pending",rows.filter(r => r.clearance_status !== "Complete").length,"red") +
+    tile("complete","Cleared",rows.filter(r => r.clearance_status === "Complete").length,"grn") +
+    tile("nodisc","With discount",rows.filter(r => +r.relationship_discount > 0).length,"amb");
+  $("money").innerHTML = tile("x","Final fees",inr(sum(rows,"final_fees")),"pct") +
+    tile("x","Received 1",inr(sum(rows,"received_1"))) + tile("x","Received 2",inr(sum(rows,"received_2"))) + tile("x","Received 3",inr(sum(rows,"received_3"))) +
+    tile("x","Discount",inr(sum(rows,"relationship_discount")),"amb") +
+    tile("x","Total received",inr(sum(rows,"total_received")),"grn") +
+    tile("x","Still pending",inr(sum(rows.filter(r => +r.balance_due > 0),"balance_due")),"red");
+  document.querySelectorAll(".stat[data-k]").forEach(el => el.onclick = () => { if (el.dataset.k === "x") return; filter.stat = filter.stat === el.dataset.k ? "" : el.dataset.k; page = 1; render(); });
+
+  let list = rows.slice();
+  if (filter.stat === "pending") list = list.filter(r => r.clearance_status !== "Complete");
+  if (filter.stat === "complete") list = list.filter(r => r.clearance_status === "Complete");
+  if (filter.stat === "nodisc") list = list.filter(r => +r.relationship_discount > 0);
+  if (filter.course) list = list.filter(r => r.main_course === filter.course);
+  if (filter.rm) list = list.filter(r => r.rm === filter.rm);
+  if (filter.qtr) list = list.filter(r => r.clearance_quarter === filter.qtr);
+  const q = filter.q.toLowerCase();
+  if (q) list = list.filter(r => [r.student_name,r.student_id,r.course_id,r.phone_no,r.source_reference].some(v => (v||"").toLowerCase().includes(q)));
+  list.sort((a,b) => { let x = a[filter.sort], y = b[filter.sort];
+    if (NUMS.includes(filter.sort) || ["total_received","balance_due"].includes(filter.sort)){ x = +x || 0; y = +y || 0; }
+    else { x = (x || "").toString().toLowerCase(); y = (y || "").toString().toLowerCase(); if (!x && !y) return 0; if (!x) return 1; if (!y) return -1; }
+    return x < y ? -filter.dir : x > y ? filter.dir : 0; });
+  document.querySelectorAll("th.sort").forEach(th => { th.classList.toggle("on", th.dataset.k === filter.sort);
+    th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); }; });
+
+  const total = list.length, pages = Math.max(1, Math.ceil(total / pageSize)); if (page > pages) page = pages;
+  const from = (page - 1) * pageSize, to = Math.min(total, from + pageSize);
+  const pg = `<span>${total ? from + 1 : 0}–${to} of ${total}</span><button class="btn ghost small" data-pg="prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button><span>Page ${page} / ${pages}</span><button class="btn ghost small" data-pg="next" ${page >= pages ? "disabled" : ""}>Next ›</button>`;
+  $("pagerTop").innerHTML = pg; $("pagerBot").innerHTML = pg;
+  document.querySelectorAll("[data-pg=prev]").forEach(b => b.onclick = () => { page--; render(); });
+  document.querySelectorAll("[data-pg=next]").forEach(b => b.onclick = () => { page++; render(); });
+
+  $("rows").innerHTML = list.slice(from, to).map(r => `<tr class="row" data-id="${r.id}">` + cols.map(k => {
+    if (NUMS.includes(k) || k === "total_received" || k === "balance_due")
+      return `<td${k === "balance_due" && +r[k] > 0 ? ' style="color:var(--warn);font-weight:500"' : ""}>${inr(r[k])}</td>`;
+    if (k === "clearance_status") return `<td><span class="pill ${r[k] === "Complete" ? "done" : "red"}">${esc(r[k] || "Pending")}</span>${r.clearance_quarter ? `<div style="font-size:11px;color:var(--muted)">${esc(r.clearance_quarter)}</div>` : ""}</td>`;
+    return `<td>${esc(r[k] || "")}</td>`; }).join("") + `</tr>`).join("");
+  $("empty").classList.toggle("hidden", list.length > 0);
+  document.querySelectorAll("tr.row").forEach(el => el.onclick = () => open(el.dataset.id));
+}
+$("q").oninput = e => { filter.q = e.target.value; page = 1; render(); };
+$("fCourse").onchange = e => { filter.course = e.target.value; page = 1; render(); };
+$("fRm").onchange = e => { filter.rm = e.target.value; page = 1; render(); };
+$("fQtr").onchange = e => { filter.qtr = e.target.value; page = 1; render(); };
+$("clearF").onclick = () => { filter = { ...filter, q: "", course: "", rm: "", qtr: "", stat: "" }; ["q","fCourse","fRm","fQtr"].forEach(i => $(i).value = ""); page = 1; render(); };
+
+/* ---------- drawer ---------- */
+function recalc(){
+  const g = k => +($("f_" + k) ? $("f_" + k).value : 0) || 0;
+  const tot = g("received_1") + g("received_2") + g("received_3") + g("relationship_discount");
+  const bal = g("final_fees") - tot;
+  $("cTotal").textContent = inr(tot); $("cBal").innerHTML = bal > 0 ? `<span style="color:var(--warn);font-weight:600">${inr(bal)}</span>` : `<span style="color:var(--green);font-weight:600">${inr(bal)}</span>`;
+  const dates = ["collection_date_1","collection_date_2","collection_date_3"].map(k => $("f_" + k) ? $("f_" + k).value : "").filter(Boolean).sort();
+  $("cClear").textContent = (g("final_fees") > 0 && tot >= g("final_fees") && dates.length) ? "Complete · " + fmtY(dates[dates.length-1]) : "Pending";
+}
+function open(id){
+  const r = id ? rows.find(x => x.id === id) : null; editingId = id || null;
+  $("dTitle").textContent = r ? (r.student_name || "Student") : "New student";
+  $("dMeta").textContent = r ? [r.student_id, r.main_course].filter(Boolean).join(" · ") : "";
+  $("form").innerHTML = GROUPS.map(g => {
+    const fs = FIELDS.filter(f => f.g === g && P(f.k) !== "hidden");
+    if (!fs.length) return "";
+    return `<h3 style="margin-top:16px">${esc(g)}</h3><div class="grid2">` + fs.map(f => {
+      const ro = P(f.k) !== "edit" || !canEdit(), v = r ? (r[f.k] ?? "") : "";
+      let input;
+      if (f.t.startsWith("list:")){ const key = f.t.slice(5);
+        input = `<select id="f_${f.k}" ${ro ? "disabled" : ""}><option value=""></option>` + opts(key).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`; }
+      else input = `<input id="f_${f.k}" type="${f.t === "date" ? "date" : f.t === "number" ? "number" : "text"}" value="${esc(v)}" ${ro ? "disabled" : ""}>`;
+      return `<div><label>${esc(f.l)}${ro ? ' <span style="color:var(--muted);font-weight:400">· read only</span>' : ""}</label>${input}</div>`;
+    }).join("") + `</div>`;
+  }).join("");
+  ["final_fees","received_1","received_2","received_3","relationship_discount","collection_date_1","collection_date_2","collection_date_3"].forEach(k => { const el = $("f_" + k); if (el) el.oninput = recalc; });
+  recalc();
+  $("fSave").style.display = canEdit() ? "" : "none";
+  $("fErr").textContent = "";
+  $("recLog").classList.toggle("hidden", !F("view_log") || !r);
+  if (r && F("view_log")){
+    const l = logs.filter(x => x.record_id === r.id).slice(0, 40);
+    $("recLogList").innerHTML = l.length ? l.map(x => { const who = (ctx.profiles.find(p => p.id === x.by_user) || {}).full_name || "";
+      const f = FIELDS.find(y => y.k === x.field_key);
+      return `<li><div class="d">${new Date(x.at).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})} · ${esc(who)}</div><div class="n">${x.action === "created" ? "Record created" : `<b>${esc(f ? f.l : x.field_key)}</b>: ${esc(x.old_value || "—")} → ${esc(x.new_value || "—")}`}</div></li>`; }).join("") : `<li style="color:var(--muted)">No changes recorded.</li>`;
+  }
+  $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0;
+}
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+$("newBtn").onclick = () => open(null);
+
+$("fSave").onclick = async () => {
+  $("fErr").textContent = "";
+  const rec = {};
+  FIELDS.forEach(f => { if (P(f.k) === "edit" && $("f_" + f.k)){ const v = $("f_" + f.k).value;
+    rec[f.k] = v === "" ? null : (NUMS.includes(f.k) ? +v : v); } });
+  if (!rec.student_name && !editingId){ $("fErr").textContent = "Student name is needed."; return; }
+  $("fSave").disabled = true;
+  try {
+    if (editingId){ const r = await sb.from("fee_students").update(rec).eq("id", editingId); if (r.error) throw r.error; }
+    else { const r = await sb.from("fee_students").insert({ ...rec, created_by: ctx.me.id }); if (r.error) throw r.error; }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  } catch (e){ $("fErr").textContent = "Could not save: " + e.message; }
+  $("fSave").disabled = false;
+};
+
+/* ---------- reports ---------- */
+const REPORTS = [
+  { key: "report_quarter", name: "Clearance quarter" },
+  { key: "report_course", name: "Course and batch" },
+  { key: "report_rm", name: "RM and source" },
+];
+let repRows = [];
+$("repBtn").onclick = () => { const av = REPORTS.filter(r => F(r.key));
+  if (!av.length){ toast("No reports available to you"); return; }
+  $("repSel").innerHTML = av.map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join(""); runRep(); $("repModal").classList.remove("hidden"); };
+$("repClose").onclick = () => $("repModal").classList.add("hidden");
+$("repSel").onchange = runRep;
+function runRep(){
+  const k = $("repSel").value;
+  const keyOf = k === "report_quarter" ? (r => r.clearance_quarter || "Not cleared") : k === "report_course" ? (r => r.main_course || "—") : (r => r.rm || "—");
+  const label = k === "report_quarter" ? "Clearance quarter" : k === "report_course" ? "Course" : "RM";
+  const by = {};
+  rows.forEach(r => { const g = keyOf(r); (by[g] ||= { [label]: g, Students: 0, "Final fees": 0, "Received": 0, "Discount": 0, "Balance due": 0, Cleared: 0 });
+    by[g].Students++; by[g]["Final fees"] += +r.final_fees || 0; by[g].Received += +r.total_received || 0;
+    by[g].Discount += +r.relationship_discount || 0; by[g]["Balance due"] += Math.max(0, +r.balance_due || 0);
+    if (r.clearance_status === "Complete") by[g].Cleared++; });
+  repRows = Object.values(by).sort((a,b) => String(a[label]).localeCompare(String(b[label])));
+  const t = repRows.reduce((s, r) => ({ Students: s.Students + r.Students, f: s.f + r["Final fees"], rc: s.rc + r.Received, d: s.d + r.Discount, b: s.b + r["Balance due"], c: s.c + r.Cleared }), { Students: 0, f: 0, rc: 0, d: 0, b: 0, c: 0 });
+  repRows.push({ [label]: "TOTAL", Students: t.Students, "Final fees": t.f, Received: t.rc, Discount: t.d, "Balance due": t.b, Cleared: t.c });
+  const cols = Object.keys(repRows[0]);
+  $("repTable").innerHTML = `<thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>` +
+    repRows.map(r => `<tr${r[label] === "TOTAL" ? ' style="font-weight:600;background:#f0f2ef"' : ""}>${cols.map(c => `<td>${["Final fees","Received","Discount","Balance due"].includes(c) ? inr(r[c]) : esc(String(r[c]))}</td>`).join("")}</tr>`).join("") + "</tbody>";
+}
+$("repXls").onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), "Report"); XLSX.writeFile(wb, `GHC_fee_report_${today()}.xlsx`); };
+$("xlsBtn").onclick = () => {
+  const vis = FIELDS.filter(f => P(f.k) !== "hidden");
+  const out = rows.map(r => { const o = {}; vis.forEach(f => o[f.l] = r[f.k] ?? "");
+    o["Total Received"] = r.total_received; o["Balance Due"] = r.balance_due; o["Clearance Quarter"] = r.clearance_quarter || ""; o["Clearance Status"] = r.clearance_status || ""; return o; });
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(out), "Fee tracker");
+  XLSX.writeFile(wb, `GHC_fee_tracker_${today()}.xlsx`);
+};
+
+/* ---------- change log ---------- */
+$("logBtn").onclick = () => { drawLog(""); $("logModal").classList.remove("hidden"); };
+$("logClose").onclick = () => $("logModal").classList.add("hidden");
+$("logQ").oninput = e => drawLog(e.target.value.toLowerCase());
+function drawLog(q){
+  const l = logs.filter(x => { if (!q) return true; const who = (ctx.profiles.find(p => p.id === x.by_user) || {}).full_name || "";
+    return (x.student_name || "").toLowerCase().includes(q) || who.toLowerCase().includes(q); }).slice(0, 500);
+  $("logTable").innerHTML = `<thead><tr><th>When</th><th>Who</th><th>Student</th><th>Change</th></tr></thead><tbody>` +
+    l.map(x => { const who = (ctx.profiles.find(p => p.id === x.by_user) || {}).full_name || "";
+      const f = FIELDS.find(y => y.k === x.field_key);
+      return `<tr><td style="white-space:nowrap">${new Date(x.at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(who)}</td><td>${esc(x.student_name || "")}</td>
+      <td>${x.action === "created" ? '<span class="pill done">created</span>' : `<b>${esc(f ? f.l : x.field_key)}</b> ${esc(x.old_value || "—")} → ${esc(x.new_value || "—")}`}</td></tr>`; }).join("") +
+    (l.length ? "" : `<tr><td colspan="4" style="color:var(--muted)">Nothing logged yet.</td></tr>`) + "</tbody>";
+}
+
+/* ---------- dropdown lists ---------- */
+$("listBtn").onclick = () => { $("listSel").innerHTML = Object.keys(LIST_LABELS).map(k => `<option value="${k}">${esc(LIST_LABELS[k])}</option>`).join(""); drawList(); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listSel").onchange = drawList;
+function drawList(){
+  const k = $("listSel").value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  $("listItems").innerHTML = items.map(i => `<li><span>${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span><a href="#" data-id="${i.id}">${i.active ? "Turn off" : "Turn on"}</a></li>`).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+  document.querySelectorAll("#listItems [data-id]").forEach(a => a.onclick = async e => { e.preventDefault();
+    const it = lookups.find(l => String(l.id) === a.dataset.id);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; drawList(); await load(); render(); });
+}
+$("listAdd").onclick = async () => {
+  const k = $("listSel").value, v = $("listNew").value.trim(); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: MOD, list_key: k, value: v, sort: lookups.filter(l => l.list_key === k).length }).select().single();
+  if (r.error){ toast(r.error.message); return; }
+  lookups.push(r.data); $("listNew").value = ""; drawList(); await load(); render(); toast("Added ✓");
+};
+
+/* ---------- field access ---------- */
+$("permBtn").onclick = () => {
+  const users = ctx.profiles.filter(p => p.role !== "admin").sort((a,b) => a.full_name.localeCompare(b.full_name));
+  $("permUser").innerHTML = users.map(u => `<option value="${u.id}">${esc(u.full_name)}</option>`).join("");
+  drawPerm(); $("permModal").classList.remove("hidden");
+};
+$("permClose").onclick = () => $("permModal").classList.add("hidden");
+$("permUser").onchange = drawPerm;
+function drawPerm(){
+  const uid = $("permUser").value;
+  $("permGrid").innerHTML = `<thead><tr><th>Field</th><th>Group</th><th>Access</th></tr></thead><tbody>` +
+    FIELDS.map(f => { const cur = (allPerms.find(p => p.module === MOD && p.field_key === f.k && p.user_id === uid) || {}).level || "";
+      return `<tr><td>${esc(f.l)}</td><td style="color:var(--muted)">${esc(f.g)}</td>
+      <td><select data-f="${f.k}"><option value="">default (edit)</option><option value="edit" ${cur==="edit"?"selected":""}>edit</option><option value="view" ${cur==="view"?"selected":""}>view only</option><option value="hidden" ${cur==="hidden"?"selected":""}>hidden</option></select></td></tr>`; }).join("") + "</tbody>";
+  document.querySelectorAll("#permGrid select").forEach(s => s.onchange = async () => {
+    const f = s.dataset.f, lvl = s.value; let r;
+    if (!lvl) r = await sb.from("field_perms").delete().eq("module", MOD).eq("field_key", f).eq("user_id", uid);
+    else r = await sb.from("field_perms").upsert({ module: MOD, field_key: f, user_id: uid, level: lvl }, { onConflict: "module,field_key,user_id" });
+    if (r.error){ alert(r.error.message); return; }
+    allPerms = allPerms.filter(p => !(p.module === MOD && p.field_key === f && p.user_id === uid));
+    if (lvl) allPerms.push({ module: MOD, field_key: f, user_id: uid, level: lvl });
+    toast("Saved ✓"); });
+  const FEATS = [["report_quarter","Clearance quarter report"],["report_course","Course and batch report"],["report_rm","RM and source report"],["export","Export to Excel"],["view_log","See the change log"],["manage_lists","Manage dropdown lists"]];
+  $("featGrid").innerHTML = `<thead><tr><th>Report or action</th><th>Allowed</th></tr></thead><tbody>` +
+    FEATS.map(([k,l]) => { const p = allFeatPerms.find(x => x.module === MOD && x.feature_key === k && x.user_id === uid);
+      return `<tr><td>${esc(l)}</td><td><input type="checkbox" data-ft="${k}" ${p ? (p.allowed ? "checked" : "") : "checked"} style="width:auto"></td></tr>`; }).join("") + "</tbody>";
+  document.querySelectorAll("#featGrid input").forEach(c => c.onchange = async () => {
+    const k = c.dataset.ft;
+    const r = await sb.from("feature_perms").upsert({ module: MOD, feature_key: k, user_id: uid, allowed: c.checked }, { onConflict: "module,feature_key,user_id" });
+    if (r.error){ alert(r.error.message); c.checked = !c.checked; return; }
+    allFeatPerms = allFeatPerms.filter(x => !(x.module === MOD && x.feature_key === k && x.user_id === uid));
+    allFeatPerms.push({ module: MOD, feature_key: k, user_id: uid, allowed: c.checked });
+    toast("Saved ✓"); });
+}
+</script>
+</body>
+</html>
