@@ -75,6 +75,7 @@ const MODULES = [
   { key: "touch",     name: "Touch & Review System", desc: "Client touches, written reviews, quarterly dashboards", href: "touch.html" },
   { key: "insurance", name: "Insurance",             desc: "Policies, renewals, documents, due-date tracking",     href: "insurance.html" },
   { key: "subs",      name: "Subscriptions",         desc: "Renewals, spend, logins, cancellations",               href: "subscriptions.html" },
+  { key: "supp_cde",  name: "Client Data Entry",     desc: "Supplementary · new client records, Zoho hand-off",    href: "client-data.html" },
 ];
 let ctx = null, userModules = [];
 const myLevel = k => ctx.isSuper ? "admin" : (ctx.access[k] || "");
@@ -188,11 +189,11 @@ $("nuAdd").onclick = async () => {
   $("nuAdd").disabled = false;
 };
 /* ================= BACKUP / RESTORE ================= */
-const TABLES = ["modules","profiles","user_modules","clients","touches","touch_log","reviews","review_log","upload_log",
+const TABLES = ["modules","profiles","user_modules","module_fields","field_perms","module_features","feature_perms","cde_clients","cde_log","clients","touches","touch_log","reviews","review_log","upload_log",
   "ins_types","ins_clients","policies","policy_members","policy_nominees","policy_files","subs","subs_log"];
-const RESTORE_ORDER = ["modules","user_modules","clients","touches","touch_log","reviews","review_log","upload_log",
+const RESTORE_ORDER = ["modules","user_modules","module_fields","field_perms","module_features","feature_perms","cde_clients","clients","touches","touch_log","reviews","review_log","upload_log",
   "ins_types","ins_clients","policies","policy_members","policy_nominees","policy_files","subs","subs_log"];
-const APP_FILES = ["index.html","touch.html","insurance.html","subscriptions.html","common.js","style.css","schema.sql","admin-users.ts","README.md"];
+const APP_FILES = ["index.html","touch.html","insurance.html","subscriptions.html","client-data.html","common.js","style.css","schema.sql","admin-users.ts","README.md"];
 
 function busy(on, txt){ let b = $("busy");
   if (!b){ b = document.createElement("div"); b.id = "busy"; b.innerHTML = '<div class="sp"></div><div id="busyTxt"></div><div style="font-size:13px;color:var(--muted)">Please keep this tab open</div>'; document.body.appendChild(b); }

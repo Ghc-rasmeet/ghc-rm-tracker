@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Client Data Entry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="band">
+      <div class="grp"><div class="rvhead">Records</div><div class="stats" id="stats"></div></div>
+      <div class="grp"><div class="rvhead">Waiting to go into Zoho</div><div class="stats" id="zstats"></div>
+        <div class="fml">Tick the boxes on a record once it has been entered in Zoho</div></div>
+    </div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search name, PAN, mobile, email, trading code, Wealthelite ID">
+      <select id="fRm" style="width:auto"><option value="">All RMs</option></select>
+      <button class="btn ghost small" id="clearF">Clear ×</button>
+      <button class="btn small" id="newBtn">+ New client</button>
+      <span class="tools">
+        <button class="btn ghost small" id="logBtn">Change log</button>
+        <button class="btn ghost small" id="repBtn">Reports</button>
+        <button class="btn ghost small" id="xlsBtn">Export</button>
+        <button class="btn ghost small hidden" id="permBtn">Field access</button>
+      </span>
+    </div>
+
+    <div class="pager" id="pagerTop"></div>
+    <div class="tablewrap"><table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="rows"></tbody></table>
+      <div class="empty hidden" id="empty">No records yet.</div></div>
+    <div class="pager" id="pagerBot"></div>
+
+    <div style="margin-top:22px">
+      <div class="tabs" id="recentTabs">
+        <button class="on" data-r="mf_setup_date">Last 15 · MF setup</button>
+        <button data-r="mf_active_date">MF activation</button>
+        <button data-r="eq_setup_date">Equity setup</button>
+        <button data-r="eq_active_date">Equity activation</button>
+      </div>
+      <div class="tablewrap"><table id="recent" style="font-size:13px"></table></div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle">New client</h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody">
+    <div id="form"></div>
+    <div id="zohoBox" style="margin-top:18px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#eef3f8">
+      <b style="font-size:13px">Entered in Zoho</b>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:8px">
+        <label class="toggle"><input type="checkbox" id="z1"> MF setup</label>
+        <label class="toggle"><input type="checkbox" id="z2"> MF activation</label>
+        <label class="toggle"><input type="checkbox" id="z3"> Equity setup</label>
+        <label class="toggle"><input type="checkbox" id="z4"> Equity activation</label>
+      </div>
+    </div>
+    <div class="err" id="fErr"></div>
+    <div style="display:flex;gap:10px;margin-top:8px"><button class="btn" id="fSave">Save</button></div>
+    <div id="recLog"><h3 style="margin-top:24px">This record's history</h3><ul class="hist" id="recLogList"></ul></div>
+  </div>
+</aside>
+
+<div id="logModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:900px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Change log</h2>
+      <input id="logQ" placeholder="filter by client or person" style="width:auto">
+      <span class="fml">kept for one year</span><button class="x" id="logClose">×</button></div>
+    <div class="tablewrap" style="margin-top:10px"><table id="logTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:820px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Reports</h2>
+      <select id="repSel" style="width:auto"></select>
+      <button class="btn ghost small" id="repXls">Export</button><button class="x" id="repClose">×</button></div>
+    <div class="tablewrap" style="margin-top:10px"><table id="repTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<div id="permModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:1000px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Field access</h2>
+      <select id="permUser" style="width:auto"></select><button class="x" id="permClose">×</button></div>
+    <div class="fml" style="margin:8px 0">Everyone with the module starts with full access. Change only what this person should not touch. <b>edit</b> change it · <b>view</b> read only · <b>hidden</b> not shown at all.</div>
+    <div class="tablewrap"><table class="grid-acc" id="permGrid" style="font-size:13px"></table></div>
+    <h3 style="font-size:14px;margin:18px 0 6px">Reports and actions</h3>
+    <div class="tablewrap"><table class="grid-acc" id="featGrid" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<div id="busy" class="hidden"><div class="sp"></div><div id="busyTxt">Working…</div></div>
+
+<script>
+const FIELDS = [{"k": "log_date", "l": "Log Date", "t": "date", "g": "Entry"}, {"k": "first_name", "l": "First Name", "t": "text", "g": "Identity"}, {"k": "last_name", "l": "Last Name", "t": "text", "g": "Identity"}, {"k": "pan_no", "l": "PAN No", "t": "text", "g": "Identity"}, {"k": "trading_code", "l": "Trading Code", "t": "text", "g": "Identity"}, {"k": "gender", "l": "Gender", "t": "select:Male|Female|Other", "g": "Identity"}, {"k": "dob", "l": "Date of Birth", "t": "date", "g": "Identity"}, {"k": "mobile", "l": "Mobile", "t": "phone", "g": "Contact"}, {"k": "email", "l": "Email", "t": "email", "g": "Contact"}, {"k": "mailing_street", "l": "Mailing Street", "t": "text", "g": "Contact"}, {"k": "mailing_city", "l": "Mailing City", "t": "text", "g": "Contact"}, {"k": "mailing_state", "l": "Mailing State", "t": "text", "g": "Contact"}, {"k": "mailing_zip", "l": "Mailing Zipcode", "t": "text", "g": "Contact"}, {"k": "eq_dealer_email", "l": "Equity Dealer email", "t": "email", "g": "Ownership"}, {"k": "rm_email", "l": "RM email", "t": "email", "g": "Ownership"}, {"k": "rm_name", "l": "RM Name", "t": "text", "g": "Ownership"}, {"k": "founder_connect", "l": "Founder Connect", "t": "text", "g": "Founder"}, {"k": "founder_ranking", "l": "Founder Ranking", "t": "text", "g": "Founder"}, {"k": "founder_reference", "l": "Founder Reference", "t": "text", "g": "Founder"}, {"k": "inside_outside", "l": "Inside/Outside", "t": "select:Inside|Outside", "g": "Founder"}, {"k": "net_worth_1", "l": "Net Worth 1", "t": "text", "g": "Founder"}, {"k": "db_source", "l": "MF & Eq Database Source", "t": "text", "g": "Founder"}, {"k": "eq_setup_date", "l": "Eq Setup Date", "t": "date", "g": "Equity"}, {"k": "eq_active_date", "l": "EQ A/C Active Date", "t": "date", "g": "Equity"}, {"k": "uploaded_in_connect", "l": "Uploaded in connect", "t": "select:Yes|No", "g": "Equity"}, {"k": "traded", "l": "Traded", "t": "select:Yes|No", "g": "Equity"}, {"k": "traded_date", "l": "Date", "t": "date", "g": "Equity"}, {"k": "bse_client_code", "l": "BSE Client Code", "t": "text", "g": "Mutual fund"}, {"k": "wealthelite_id", "l": "Wealthelite Cust Id.", "t": "text", "g": "Mutual fund"}, {"k": "mf_setup_date", "l": "MF Setup Date", "t": "date", "g": "Mutual fund"}, {"k": "mf_active_date", "l": "MF A/C Active Date", "t": "date", "g": "Mutual fund"}, {"k": "folio_check_date", "l": "Folio Creation Check Date", "t": "date", "g": "Mutual fund"}, {"k": "change_of_broker", "l": "Change of Broker", "t": "select:Yes|No", "g": "Mutual fund"}];
+const GROUPS = ["Entry", "Identity", "Contact", "Ownership", "Founder", "Equity", "Mutual fund"];
+const MOD = "supp_cde";
+let ctx, rows = [], logs = [], fperm = {}, feat = {}, allPerms = [], allFeatPerms = [];
+let filter = { q: "", rm: "", stat: "" , sort: "log_date", dir: -1 }, page = 1, pageSize = 100, editingId = null;
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+const P = k => ctx.isSuper ? "edit" : (fperm[k] || (canEdit() ? "edit" : "view"));
+const F = k => ctx.isSuper ? true : (feat[k] !== undefined ? feat[k] : true);
+const LIST = ["log_date","first_name","last_name","pan_no","mobile","rm_name","mf_setup_date","mf_active_date","eq_setup_date","eq_active_date"];
+
+(async () => {
+  ctx = await requireAuth(MOD); if (!ctx) return;
+  shellHeader("Client Data Entry", ctx);
+  await load();
+  $("app").classList.remove("hidden");
+  if (!canEdit()) $("newBtn").classList.add("hidden");
+  if (ctx.isSuper || ctx.level === "admin") $("permBtn").classList.remove("hidden");
+  if (!F("view_log")) $("logBtn").classList.add("hidden");
+  if (!F("export")) $("xlsBtn").classList.add("hidden");
+  render();
+})();
+
+async function load(){
+  try { (await fetchAll("field_perms","module, field_key, user_id, level")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) fperm[r.field_key] = r.level; allPerms.push(r); }); } catch (e){}
+  try { (await fetchAll("feature_perms","module, feature_key, user_id, allowed")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) feat[r.feature_key] = r.allowed; allFeatPerms.push(r); }); } catch (e){}
+  rows = await fetchAll("cde_view", "*");
+  if (F("view_log")) { try { logs = await fetchAll("cde_log", "*", { col: "at", asc: false }); } catch (e){ logs = []; } }
+  const rms = [...new Set(rows.map(r => r.rm_name).filter(Boolean))].sort();
+  $("fRm").innerHTML = `<option value="">All RMs</option>` + rms.map(r => `<option>${esc(r)}</option>`).join("");
+}
+
+/* ---------- table ---------- */
+function visibleCols(){ return LIST.filter(k => P(k) !== "hidden"); }
+function render(){
+  const cols = visibleCols();
+  $("thead").innerHTML = cols.map(k => { const f = FIELDS.find(x => x.k === k); return `<th class="sort" data-k="${k}">${esc(f ? f.l : k)}</th>`; }).join("") + `<th class="side">Zoho</th>`;
+  const tile = (k, l, v, cls = "") => `<div class="stat ${cls} ${filter.stat===k?"active":""}" data-k="${k}"><b>${v}</b><span>${l}</span></div>`;
+  const pend = f => rows.filter(r => r[f.split("|")[0]] && !r[f.split("|")[1]]).length;
+  $("stats").innerHTML = tile("all","Total",rows.length) + tile("month","Added this month",rows.filter(r => (r.log_date||"").slice(0,7) === today().slice(0,7)).length,"grn") +
+    tile("nopan","Missing PAN",rows.filter(r => !r.pan_no).length,"amb");
+  $("zstats").innerHTML =
+    tile("z1","MF setup",pend("mf_setup_date|zoho_mf_setup"),"red") +
+    tile("z2","MF activation",pend("mf_active_date|zoho_mf_active"),"red") +
+    tile("z3","Equity setup",pend("eq_setup_date|zoho_eq_setup"),"amb") +
+    tile("z4","Equity activation",pend("eq_active_date|zoho_eq_active"),"amb");
+  document.querySelectorAll(".stat[data-k]").forEach(el => el.onclick = () => { filter.stat = filter.stat === el.dataset.k ? "" : el.dataset.k; page = 1; render(); });
+
+  let list = rows.slice();
+  if (filter.stat === "month") list = list.filter(r => (r.log_date||"").slice(0,7) === today().slice(0,7));
+  if (filter.stat === "nopan") list = list.filter(r => !r.pan_no);
+  if (filter.stat === "z1") list = list.filter(r => r.mf_setup_date && !r.zoho_mf_setup);
+  if (filter.stat === "z2") list = list.filter(r => r.mf_active_date && !r.zoho_mf_active);
+  if (filter.stat === "z3") list = list.filter(r => r.eq_setup_date && !r.zoho_eq_setup);
+  if (filter.stat === "z4") list = list.filter(r => r.eq_active_date && !r.zoho_eq_active);
+  if (filter.rm) list = list.filter(r => r.rm_name === filter.rm);
+  const q = filter.q.toLowerCase();
+  if (q) list = list.filter(r => [r.first_name,r.last_name,r.pan_no,r.mobile,r.email,r.trading_code,r.wealthelite_id,r.bse_client_code].some(v => (v||"").toLowerCase().includes(q)));
+  list.sort((a,b) => { const x = a[filter.sort] || "", y = b[filter.sort] || ""; if (!x && !y) return 0; if (!x) return 1; if (!y) return -1; return x < y ? -filter.dir : x > y ? filter.dir : 0; });
+  document.querySelectorAll("th.sort").forEach(th => { th.classList.toggle("on", th.dataset.k === filter.sort);
+    th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); }; });
+
+  const total = list.length, pages = Math.max(1, Math.ceil(total / pageSize)); if (page > pages) page = pages;
+  const from = (page - 1) * pageSize, to = Math.min(total, from + pageSize);
+  const pg = `<span>${total ? from + 1 : 0}–${to} of ${total}</span><button class="btn ghost small" data-pg="prev" ${page <= 1 ? "disabled" : ""}>‹ Prev</button><span>Page ${page} / ${pages}</span><button class="btn ghost small" data-pg="next" ${page >= pages ? "disabled" : ""}>Next ›</button>`;
+  $("pagerTop").innerHTML = pg; $("pagerBot").innerHTML = pg;
+  document.querySelectorAll("[data-pg=prev]").forEach(b => b.onclick = () => { page--; render(); });
+  document.querySelectorAll("[data-pg=next]").forEach(b => b.onclick = () => { page++; render(); });
+
+  $("rows").innerHTML = list.slice(from, to).map(r => `<tr class="row" data-id="${r.id}">` +
+    cols.map(k => { const f = FIELDS.find(x => x.k === k); const v = r[k];
+      return `<td>${f && f.t === "date" ? fmtY(v) : esc(v || "")}</td>`; }).join("") +
+    `<td class="side" style="white-space:nowrap">${[["mf_setup_date","zoho_mf_setup","MF"],["mf_active_date","zoho_mf_active","MFA"],["eq_setup_date","zoho_eq_setup","EQ"],["eq_active_date","zoho_eq_active","EQA"]]
+      .filter(([d]) => r[d]).map(([d,z,lbl]) => `<span class="pill ${r[z] ? "done" : "red"}" title="${r[z] ? "in Zoho" : "not in Zoho yet"}">${lbl}</span> `).join("") || "—"}</td></tr>`).join("");
+  $("empty").classList.toggle("hidden", list.length > 0);
+  document.querySelectorAll("tr.row").forEach(el => el.onclick = () => open(el.dataset.id));
+  renderRecent();
+}
+$("q").oninput = e => { filter.q = e.target.value; page = 1; render(); };
+$("fRm").onchange = e => { filter.rm = e.target.value; page = 1; render(); };
+$("clearF").onclick = () => { filter = { ...filter, q: "", rm: "", stat: "" }; $("q").value = ""; $("fRm").value = ""; page = 1; render(); };
+
+let recentKey = "mf_setup_date";
+document.querySelectorAll("#recentTabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#recentTabs button").forEach(x => x.classList.toggle("on", x === b));
+  recentKey = b.dataset.r; renderRecent(); });
+function renderRecent(){
+  if (P(recentKey) === "hidden"){ $("recent").innerHTML = ""; return; }
+  const l = rows.filter(r => r[recentKey]).sort((a,b) => b[recentKey].localeCompare(a[recentKey])).slice(0, 15);
+  $("recent").innerHTML = `<thead><tr><th>Date</th><th>Client</th><th>PAN</th><th>RM</th><th>In Zoho</th></tr></thead><tbody>` +
+    l.map(r => { const z = { mf_setup_date: "zoho_mf_setup", mf_active_date: "zoho_mf_active", eq_setup_date: "zoho_eq_setup", eq_active_date: "zoho_eq_active" }[recentKey];
+      return `<tr class="row" data-id="${r.id}" style="cursor:pointer"><td>${fmtY(r[recentKey])}</td><td>${esc((r.first_name||"") + " " + (r.last_name||""))}</td><td>${esc(r.pan_no||"")}</td><td>${esc(r.rm_name||"")}</td><td><span class="pill ${r[z] ? "done" : "red"}">${r[z] ? "yes" : "pending"}</span></td></tr>`; }).join("") +
+    (l.length ? "" : `<tr><td colspan="5" style="color:var(--muted)">Nothing yet.</td></tr>`) + "</tbody>";
+  document.querySelectorAll("#recent tr.row").forEach(el => el.onclick = () => open(el.dataset.id));
+}
+
+/* ---------- drawer ---------- */
+function open(id){
+  const r = id ? rows.find(x => x.id === id) : null; editingId = id || null;
+  $("dTitle").textContent = r ? ((r.first_name||"") + " " + (r.last_name||"")).trim() || "Client" : "New client";
+  $("dMeta").textContent = r ? [r.pan_no, r.rm_name].filter(Boolean).join(" · ") : "";
+  $("form").innerHTML = GROUPS.map(g => {
+    const fs = FIELDS.filter(f => f.g === g && P(f.k) !== "hidden");
+    if (!fs.length) return "";
+    return `<h3 style="margin-top:16px">${esc(g)}</h3><div class="grid2">` + fs.map(f => {
+      const ro = P(f.k) !== "edit" || !canEdit(), v = r ? (r[f.k] ?? "") : "";
+      let input;
+      if (f.t.startsWith("select:")) input = `<select id="f_${f.k}" ${ro ? "disabled" : ""}><option value=""></option>` + f.t.slice(7).split("|").map(o => `<option ${v === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+      else input = `<input id="f_${f.k}" type="${f.t === "date" ? "date" : f.t === "email" ? "email" : "text"}" value="${esc(v)}" ${ro ? "disabled" : ""}>`;
+      return `<div><label>${esc(f.l)}${ro ? ' <span style="color:var(--muted);font-weight:400">· read only</span>' : ""}</label>${input}</div>`;
+    }).join("") + `</div>`;
+  }).join("");
+  const zc = F("zoho_flags") && canEdit();
+  [["z1","zoho_mf_setup"],["z2","zoho_mf_active"],["z3","zoho_eq_setup"],["z4","zoho_eq_active"]].forEach(([id2, k]) => { $(id2).checked = r ? !!r[k] : false; $(id2).disabled = !zc; });
+  $("fSave").style.display = canEdit() ? "" : "none";
+  $("fErr").textContent = "";
+  $("recLog").classList.toggle("hidden", !F("view_log") || !r);
+  if (r && F("view_log")){
+    const l = logs.filter(x => x.record_id === r.id).slice(0, 40);
+    $("recLogList").innerHTML = l.length ? l.map(x => { const who = (ctx.profiles.find(p => p.id === x.by_user) || {}).full_name || "";
+      const f = FIELDS.find(y => y.k === x.field_key);
+      return `<li><div class="d">${new Date(x.at).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})} · ${esc(who)}</div><div class="n">${x.action === "created" ? "Record created" : `<b>${esc(f ? f.l : x.field_key)}</b>: ${esc(x.old_value || "—")} → ${esc(x.new_value || "—")}`}</div></li>`; }).join("") : `<li style="color:var(--muted)">No changes recorded.</li>`;
+  }
+  $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0;
+}
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+$("newBtn").onclick = () => open(null);
+
+$("fSave").onclick = async () => {
+  $("fErr").textContent = "";
+  const rec = {};
+  FIELDS.forEach(f => { if (P(f.k) === "edit" && $("f_" + f.k)) rec[f.k] = $("f_" + f.k).value || null; });
+  if (!rec.first_name && !rec.last_name && !editingId){ $("fErr").textContent = "A name is needed."; return; }
+  if (F("zoho_flags")){ rec.zoho_mf_setup = $("z1").checked; rec.zoho_mf_active = $("z2").checked; rec.zoho_eq_setup = $("z3").checked; rec.zoho_eq_active = $("z4").checked; }
+  $("fSave").disabled = true;
+  try {
+    if (editingId){ const r = await sb.from("cde_clients").update(rec).eq("id", editingId); if (r.error) throw r.error; }
+    else { if (!rec.log_date) rec.log_date = today(); const r = await sb.from("cde_clients").insert({ ...rec, created_by: ctx.me.id }); if (r.error) throw r.error; }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  } catch (e){ $("fErr").textContent = "Could not save: " + e.message; }
+  $("fSave").disabled = false;
+};
+
+/* ---------- change log ---------- */
+$("logBtn").onclick = () => { drawLog(""); $("logModal").classList.remove("hidden"); };
+$("logClose").onclick = () => $("logModal").classList.add("hidden");
+$("logQ").oninput = e => drawLog(e.target.value.toLowerCase());
+function drawLog(q){
+  const l = logs.filter(x => { if (!q) return true; const who = (ctx.profiles.find(p => p.id === x.by_user) || {}).full_name || "";
+    return (x.client_name || "").toLowerCase().includes(q) || who.toLowerCase().includes(q); }).slice(0, 500);
+  $("logTable").innerHTML = `<thead><tr><th>When</th><th>Who</th><th>Client</th><th>Change</th></tr></thead><tbody>` +
+    l.map(x => { const who = (ctx.profiles.find(p => p.id === x.by_user) || {}).full_name || "";
+      const f = FIELDS.find(y => y.k === x.field_key);
+      return `<tr><td style="white-space:nowrap">${new Date(x.at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(who)}</td><td>${esc(x.client_name || "")}</td>
+      <td>${x.action === "created" ? '<span class="pill done">created</span>' : `<b>${esc(f ? f.l : x.field_key)}</b> ${esc(x.old_value || "—")} → ${esc(x.new_value || "—")}`}</td></tr>`; }).join("") +
+    (l.length ? "" : `<tr><td colspan="4" style="color:var(--muted)">Nothing logged yet.</td></tr>`) + "</tbody>";
+}
+
+/* ---------- reports ---------- */
+const REPORTS = [
+  { key: "report_pipeline", name: "Setup & activation pipeline" },
+  { key: "report_founder", name: "Founder connect" },
+];
+let repRows = [];
+$("repBtn").onclick = () => { const av = REPORTS.filter(r => F(r.key));
+  if (!av.length){ toast("No reports available to you"); return; }
+  $("repSel").innerHTML = av.map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join(""); runRep(); $("repModal").classList.remove("hidden"); };
+$("repClose").onclick = () => $("repModal").classList.add("hidden");
+$("repSel").onchange = runRep;
+function runRep(){
+  const k = $("repSel").value;
+  if (k === "report_pipeline"){
+    const by = {};
+    rows.forEach(r => { const g = r.rm_name || "—"; (by[g] ||= { RM: g, Clients: 0, "MF setup": 0, "MF active": 0, "Eq setup": 0, "Eq active": 0, "Pending in Zoho": 0 });
+      by[g].Clients++;
+      if (r.mf_setup_date) by[g]["MF setup"]++; if (r.mf_active_date) by[g]["MF active"]++;
+      if (r.eq_setup_date) by[g]["Eq setup"]++; if (r.eq_active_date) by[g]["Eq active"]++;
+      if ((r.mf_setup_date && !r.zoho_mf_setup) || (r.mf_active_date && !r.zoho_mf_active) || (r.eq_setup_date && !r.zoho_eq_setup) || (r.eq_active_date && !r.zoho_eq_active)) by[g]["Pending in Zoho"]++; });
+    repRows = Object.values(by).sort((a,b) => b.Clients - a.Clients);
+  } else {
+    const by = {};
+    rows.forEach(r => { const g = r.founder_connect || "—"; (by[g] ||= { "Founder connect": g, Clients: 0, Inside: 0, Outside: 0 });
+      by[g].Clients++; if ((r.inside_outside||"").toLowerCase() === "inside") by[g].Inside++; if ((r.inside_outside||"").toLowerCase() === "outside") by[g].Outside++; });
+    repRows = Object.values(by).sort((a,b) => b.Clients - a.Clients);
+  }
+  const cols = Object.keys(repRows[0] || { "": "" });
+  $("repTable").innerHTML = `<thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>` +
+    repRows.map(r => `<tr>${cols.map(c => `<td>${esc(String(r[c]))}</td>`).join("")}</tr>`).join("") + "</tbody>";
+}
+$("repXls").onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), "Report"); XLSX.writeFile(wb, `GHC_cde_report_${today()}.xlsx`); };
+$("xlsBtn").onclick = () => {
+  const vis = FIELDS.filter(f => P(f.k) !== "hidden");
+  const out = rows.map(r => { const o = {}; vis.forEach(f => o[f.l] = r[f.k] || ""); 
+    o["Zoho MF setup"] = r.zoho_mf_setup ? "yes" : ""; o["Zoho MF active"] = r.zoho_mf_active ? "yes" : "";
+    o["Zoho Eq setup"] = r.zoho_eq_setup ? "yes" : ""; o["Zoho Eq active"] = r.zoho_eq_active ? "yes" : ""; return o; });
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(out), "Clients");
+  XLSX.writeFile(wb, `GHC_client_data_${today()}.xlsx`);
+};
+
+/* ---------- field access (module admin) ---------- */
+$("permBtn").onclick = async () => {
+  const users = ctx.profiles.filter(p => p.role !== "admin").sort((a,b) => a.full_name.localeCompare(b.full_name));
+  $("permUser").innerHTML = users.map(u => `<option value="${u.id}">${esc(u.full_name)}</option>`).join("");
+  drawPerm(); $("permModal").classList.remove("hidden");
+};
+$("permClose").onclick = () => $("permModal").classList.add("hidden");
+$("permUser").onchange = drawPerm;
+function drawPerm(){
+  const uid = $("permUser").value;
+  $("permGrid").innerHTML = `<thead><tr><th>Field</th><th>Group</th><th>Access</th></tr></thead><tbody>` +
+    FIELDS.map(f => { const cur = (allPerms.find(p => p.module === MOD && p.field_key === f.k && p.user_id === uid) || {}).level || "";
+      return `<tr><td>${esc(f.l)}</td><td style="color:var(--muted)">${esc(f.g)}</td>
+      <td><select data-f="${f.k}"><option value="">default (edit)</option><option value="edit" ${cur==="edit"?"selected":""}>edit</option><option value="view" ${cur==="view"?"selected":""}>view only</option><option value="hidden" ${cur==="hidden"?"selected":""}>hidden</option></select></td></tr>`; }).join("") + "</tbody>";
+  document.querySelectorAll("#permGrid select").forEach(s => s.onchange = async () => {
+    const f = s.dataset.f, lvl = s.value;
+    let r;
+    if (!lvl) r = await sb.from("field_perms").delete().eq("module", MOD).eq("field_key", f).eq("user_id", uid);
+    else r = await sb.from("field_perms").upsert({ module: MOD, field_key: f, user_id: uid, level: lvl }, { onConflict: "module,field_key,user_id" });
+    if (r.error){ alert(r.error.message); return; }
+    allPerms = allPerms.filter(p => !(p.module === MOD && p.field_key === f && p.user_id === uid));
+    if (lvl) allPerms.push({ module: MOD, field_key: f, user_id: uid, level: lvl });
+    toast("Saved ✓");
+  });
+  const FEATS = [["report_pipeline","Setup & activation report"],["report_founder","Founder connect report"],["zoho_flags","Tick the Zoho boxes"],["export","Export to Excel"],["view_log","See the change log"]];
+  $("featGrid").innerHTML = `<thead><tr><th>Report or action</th><th>Allowed</th></tr></thead><tbody>` +
+    FEATS.map(([k,l]) => { const p = allFeatPerms.find(x => x.module === MOD && x.feature_key === k && x.user_id === uid);
+      const on = p ? p.allowed : true;
+      return `<tr><td>${esc(l)}</td><td><input type="checkbox" data-ft="${k}" ${on ? "checked" : ""} style="width:auto"></td></tr>`; }).join("") + "</tbody>";
+  document.querySelectorAll("#featGrid input").forEach(c => c.onchange = async () => {
+    const k = c.dataset.ft;
+    const r = await sb.from("feature_perms").upsert({ module: MOD, feature_key: k, user_id: uid, allowed: c.checked }, { onConflict: "module,feature_key,user_id" });
+    if (r.error){ alert(r.error.message); c.checked = !c.checked; return; }
+    allFeatPerms = allFeatPerms.filter(x => !(x.module === MOD && x.feature_key === k && x.user_id === uid));
+    allFeatPerms.push({ module: MOD, feature_key: k, user_id: uid, allowed: c.checked });
+    toast("Saved ✓");
+  });
+}
+</script>
+</body>
+</html>
