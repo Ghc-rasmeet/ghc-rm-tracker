@@ -66,7 +66,7 @@
   <div class="upbox" style="max-width:900px;max-height:90vh;overflow:auto">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Reports</h2>
       <select id="repSel" style="width:auto"></select>
-      <button class="btn ghost small" id="repXls">Export</button><button class="x" id="repClose">×</button></div>
+      <button class="btn ghost small hidden" id="repXls">Export</button><button class="x" id="repClose">×</button></div>
     <div class="tablewrap" style="margin-top:10px"><table id="repTable" style="font-size:13px"></table></div>
   </div>
 </div>
@@ -122,7 +122,7 @@ const LIST = ["student_name","main_course","reg_quarter","final_fees","total_rec
   if (ctx.isSuper || ctx.level === "admin"){ $("permBtn").classList.remove("hidden"); }
   if (F("manage_lists") && (ctx.isSuper || ctx.level === "admin")) $("listBtn").classList.remove("hidden");
   if (!F("view_log")) $("logBtn").classList.add("hidden");
-  if (!F("export")) $("xlsBtn").classList.add("hidden");
+  if (!F("export") || !(ctx.isSuper || ctx.level === "admin")) $("xlsBtn").classList.add("hidden");
   render();
 })();
 
@@ -257,7 +257,7 @@ const REPORTS = [
   { key: "report_rm", name: "RM and source" },
 ];
 let repRows = [];
-$("repBtn").onclick = () => { const av = REPORTS.filter(r => F(r.key));
+$("repBtn").onclick = () => { $("repXls").classList.toggle("hidden", !(ctx.isSuper || ctx.level === "admin")); const av = REPORTS.filter(r => F(r.key));
   if (!av.length){ toast("No reports available to you"); return; }
   $("repSel").innerHTML = av.map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join(""); runRep(); $("repModal").classList.remove("hidden"); };
 $("repClose").onclick = () => $("repModal").classList.add("hidden");

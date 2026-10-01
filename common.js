@@ -1,7 +1,7 @@
 /* ===== GHC Hub — shared ===== */
 const SUPABASE_URL = "https://smxmxrajahsajuwavzlb.supabase.co";
 const SUPABASE_KEY = "sb_publishable_xQ6tkpeP0VVnp53eKVzqBw_UURnzkuW";
-const APP_VERSION = "v6.1";
+const APP_VERSION = "v6.2";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const $ = id => document.getElementById(id);

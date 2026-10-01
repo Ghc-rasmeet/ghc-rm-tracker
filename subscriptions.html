@@ -104,7 +104,7 @@
   <div class="upbox" style="max-width:760px;max-height:90vh;overflow:auto">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Spend report</h2>
       <select id="rBy" style="width:auto"><option value="category">By category</option><option value="pay_mode">By payment mode</option><option value="cycle">By billing cycle</option></select>
-      <button class="btn ghost small" id="rXls">Export</button><button class="x" id="rClose">×</button></div>
+      <button class="btn ghost small hidden" id="rXls">Export</button><button class="x" id="rClose">×</button></div>
     <div class="fml" style="margin:8px 0">Active subscriptions only · yearly figure = per-month × 12</div>
     <div class="tablewrap"><table id="rTable" style="font-size:13px"></table></div>
   </div>
@@ -309,7 +309,7 @@ $("sRenew").onclick = async () => {
 
 /* ---- report ---- */
 let repRows = [];
-$("repBtn").onclick = () => { runRep(); $("repModal").classList.remove("hidden"); };
+$("repBtn").onclick = () => { $("rXls").classList.toggle("hidden", !(ctx.isSuper || ctx.level === "admin")); runRep(); $("repModal").classList.remove("hidden"); };
 $("dClose2").onclick = () => $("dupModal").classList.add("hidden");
 function showDups(){
   const gs = dupGroups();

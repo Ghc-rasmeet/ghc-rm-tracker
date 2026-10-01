@@ -314,7 +314,7 @@ $("pSave").onclick = async () => {
 
 /* ===== report ===== */
 let repRows = [];
-$("repBtn").onclick = () => { const t = today(); $("rFrom").value = t.slice(0,8) + "01"; $("rTo").value = t; runReport(); $("repModal").classList.remove("hidden"); };
+$("repBtn").onclick = () => { $("repXls").classList.toggle("hidden", !(ctx.isSuper || ctx.level === "admin")); const t = today(); $("rFrom").value = t.slice(0,8) + "01"; $("rTo").value = t; runReport(); $("repModal").classList.remove("hidden"); };
 $("rClose").onclick = () => $("repModal").classList.add("hidden"); $("rRun").onclick = runReport;
 function runReport(){
   const f = $("rFrom").value, t = $("rTo").value;
