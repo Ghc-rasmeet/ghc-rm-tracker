@@ -30,6 +30,7 @@
         <button class="btn ghost small" id="logBtn">Change log</button>
         <button class="btn ghost small" id="repBtn">Reports</button>
         <button class="btn ghost small" id="xlsBtn">Export</button>
+        <button class="btn ghost small hidden" id="listBtn">Lists</button>
         <button class="btn ghost small hidden" id="permBtn">Field access</button>
       </span>
     </div>
@@ -98,6 +99,14 @@
   </div>
 </div>
 
+<div id="listModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:560px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Dropdown lists</h2>
+      <select id="listSel" style="width:auto"></select><button class="x" id="listClose">×</button></div>
+    <ul id="listItems" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="listNew" placeholder="Add a new option"><button class="btn small" id="listAdd">Add</button></div>
+  </div>
+</div>
 <div id="permModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="upbox" style="max-width:1000px;max-height:90vh;overflow:auto">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Field access</h2>
@@ -112,7 +121,7 @@
 <div id="busy" class="hidden"><div class="sp"></div><div id="busyTxt">Working…</div></div>
 
 <script>
-const FIELDS = [{"k": "log_date", "l": "Log Date", "t": "date", "g": "Entry"}, {"k": "first_name", "l": "First Name", "t": "text", "g": "Identity"}, {"k": "last_name", "l": "Last Name", "t": "text", "g": "Identity"}, {"k": "pan_no", "l": "PAN No", "t": "text", "g": "Identity"}, {"k": "trading_code", "l": "Trading Code", "t": "text", "g": "Identity"}, {"k": "gender", "l": "Gender", "t": "select:Male|Female|Other", "g": "Identity"}, {"k": "dob", "l": "Date of Birth", "t": "date", "g": "Identity"}, {"k": "mobile", "l": "Mobile", "t": "phone", "g": "Contact"}, {"k": "email", "l": "Email", "t": "email", "g": "Contact"}, {"k": "mailing_street", "l": "Mailing Street", "t": "text", "g": "Contact"}, {"k": "mailing_city", "l": "Mailing City", "t": "text", "g": "Contact"}, {"k": "mailing_state", "l": "Mailing State", "t": "text", "g": "Contact"}, {"k": "mailing_zip", "l": "Mailing Zipcode", "t": "text", "g": "Contact"}, {"k": "eq_dealer_email", "l": "Equity Dealer email", "t": "email", "g": "Ownership"}, {"k": "rm_email", "l": "RM email", "t": "email", "g": "Ownership"}, {"k": "rm_name", "l": "RM Name", "t": "text", "g": "Ownership"}, {"k": "founder_connect", "l": "Founder Connect", "t": "text", "g": "Founder"}, {"k": "founder_ranking", "l": "Founder Ranking", "t": "text", "g": "Founder"}, {"k": "founder_reference", "l": "Founder Reference", "t": "text", "g": "Founder"}, {"k": "inside_outside", "l": "Inside/Outside", "t": "select:Inside|Outside", "g": "Founder"}, {"k": "net_worth_1", "l": "Net Worth 1", "t": "text", "g": "Founder"}, {"k": "db_source", "l": "MF & Eq Database Source", "t": "text", "g": "Founder"}, {"k": "eq_setup_date", "l": "Eq Setup Date", "t": "date", "g": "Equity"}, {"k": "eq_active_date", "l": "EQ A/C Active Date", "t": "date", "g": "Equity"}, {"k": "uploaded_in_connect", "l": "Uploaded in connect", "t": "select:Yes|No", "g": "Equity"}, {"k": "traded", "l": "Traded", "t": "select:Yes|No", "g": "Equity"}, {"k": "traded_date", "l": "Date", "t": "date", "g": "Equity"}, {"k": "bse_client_code", "l": "BSE Client Code", "t": "text", "g": "Mutual fund"}, {"k": "wealthelite_id", "l": "Wealthelite Cust Id.", "t": "text", "g": "Mutual fund"}, {"k": "mf_setup_date", "l": "MF Setup Date", "t": "date", "g": "Mutual fund"}, {"k": "mf_active_date", "l": "MF A/C Active Date", "t": "date", "g": "Mutual fund"}, {"k": "folio_check_date", "l": "Folio Creation Check Date", "t": "date", "g": "Mutual fund"}, {"k": "change_of_broker", "l": "Change of Broker", "t": "select:Yes|No", "g": "Mutual fund"}];
+const FIELDS = [{"k": "log_date", "l": "Log Date", "t": "date", "g": "Entry"}, {"k": "first_name", "l": "First Name", "t": "text", "g": "Identity"}, {"k": "last_name", "l": "Last Name", "t": "text", "g": "Identity"}, {"k": "pan_no", "l": "PAN No", "t": "text", "g": "Identity"}, {"k": "trading_code", "l": "Trading Code", "t": "text", "g": "Identity"}, {"k": "gender", "l": "Gender", "t": "select:Male|Female|Other", "g": "Identity"}, {"k": "dob", "l": "Date of Birth", "t": "date", "g": "Identity"}, {"k": "mobile", "l": "Mobile", "t": "phone", "g": "Contact"}, {"k": "email", "l": "Email", "t": "email", "g": "Contact"}, {"k": "mailing_street", "l": "Mailing Street", "t": "text", "g": "Contact"}, {"k": "mailing_city", "l": "Mailing City", "t": "text", "g": "Contact"}, {"k": "mailing_state", "l": "Mailing State", "t": "text", "g": "Contact"}, {"k": "mailing_zip", "l": "Mailing Zipcode", "t": "text", "g": "Contact"}, {"k": "eq_dealer_email", "l": "Equity Dealer email", "t": "email", "g": "Ownership"}, {"k": "rm_email", "l": "RM email", "t": "email", "g": "Ownership"}, {"k": "rm_name", "l": "RM Name", "t": "text", "g": "Ownership"}, {"k": "eq_rm", "l": "Equity RM", "t": "list:eqrm", "g": "Ownership"}, {"k": "founder_connect", "l": "Founder Connect", "t": "text", "g": "Founder"}, {"k": "founder_ranking", "l": "Founder Ranking", "t": "text", "g": "Founder"}, {"k": "founder_reference", "l": "Founder Reference", "t": "text", "g": "Founder"}, {"k": "inside_outside", "l": "Inside/Outside", "t": "select:Inside|Outside", "g": "Founder"}, {"k": "net_worth_1", "l": "Net Worth 1", "t": "text", "g": "Founder"}, {"k": "db_source", "l": "MF & Eq Database Source", "t": "text", "g": "Founder"}, {"k": "eq_setup_date", "l": "Eq Setup Date", "t": "date", "g": "Equity"}, {"k": "eq_active_date", "l": "EQ A/C Active Date", "t": "date", "g": "Equity"}, {"k": "uploaded_in_connect", "l": "Uploaded in connect", "t": "select:Yes|No", "g": "Equity"}, {"k": "traded", "l": "Traded", "t": "select:Yes|No", "g": "Equity"}, {"k": "traded_date", "l": "Date", "t": "date", "g": "Equity"}, {"k": "bse_client_code", "l": "BSE Client Code", "t": "text", "g": "Mutual fund"}, {"k": "wealthelite_id", "l": "Wealthelite Cust Id.", "t": "text", "g": "Mutual fund"}, {"k": "mf_setup_date", "l": "MF Setup Date", "t": "date", "g": "Mutual fund"}, {"k": "mf_active_date", "l": "MF A/C Active Date", "t": "date", "g": "Mutual fund"}, {"k": "folio_check_date", "l": "Folio Creation Check Date", "t": "date", "g": "Mutual fund"}, {"k": "change_of_broker", "l": "Change of Broker", "t": "select:Yes|No", "g": "Mutual fund"}];
 const GROUPS = ["Entry", "Identity", "Contact", "Ownership", "Founder", "Equity", "Mutual fund"];
 const MOD = "supp_cde";
 let ctx, rows = [], logs = [], lookups = [], fperm = {}, feat = {}, allPerms = [], allFeatPerms = [];
@@ -130,7 +139,7 @@ const LIST = ["log_date","first_name","last_name","pan_no","mobile","rm_name","m
   await load();
   $("app").classList.remove("hidden");
   if (!canEdit()) $("newBtn").classList.add("hidden");
-  if (ctx.isSuper || ctx.level === "admin") $("permBtn").classList.remove("hidden");
+  if (ctx.isSuper || ctx.level === "admin"){ $("permBtn").classList.remove("hidden"); if (F("manage_lists")) $("listBtn").classList.remove("hidden"); }
   if (!F("view_log")) $("logBtn").classList.add("hidden");
   if (!F("export") || !isAdmin()) $("xlsBtn").classList.add("hidden");
   render();
@@ -140,7 +149,7 @@ async function load(){
   try { (await fetchAll("field_perms","module, field_key, user_id, level")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) fperm[r.field_key] = r.level; allPerms.push(r); }); } catch (e){}
   try { (await fetchAll("feature_perms","module, feature_key, user_id, allowed")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) feat[r.feature_key] = r.allowed; allFeatPerms.push(r); }); } catch (e){}
   try { lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === MOD); } catch (e){ lookups = []; }
-  try { (await fetchAll("module_fields","module, field_key, ftype")).filter(f => f.module === MOD).forEach(f => { const x = FIELDS.find(y => y.k === f.field_key); if (x && f.ftype) x.t = f.ftype; }); } catch (e){}
+  try { (await fetchAll("module_fields","module, field_key, ftype")).filter(f => f.module === MOD).forEach(f => { const x = FIELDS.find(y => y.k === f.field_key); if (x){ if (f.ftype) x.t = f.ftype; if (f.label) x.l = f.label; } }); } catch (e){}
   rows = await fetchAll("cde_view", "*");
   if (F("view_log")) { try { logs = await fetchAll("cde_log", "*", { col: "at", asc: false }); } catch (e){ logs = []; } }
   const rms = [...new Set(rows.map(r => r.rm_name).filter(Boolean))].sort();
@@ -327,6 +336,29 @@ $("xlsBtn").onclick = () => {
     o["Zoho Eq setup"] = r.zoho_eq_setup ? "yes" : ""; o["Zoho Eq active"] = r.zoho_eq_active ? "yes" : ""; return o; });
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(out), "Clients");
   XLSX.writeFile(wb, `GHC_client_data_${today()}.xlsx`);
+};
+
+/* ---------- dropdown lists ---------- */
+const LIST_LABELS = { eqdealer:"Equity dealer email", rmemail:"RM email", rmname:"RM name", eqrm:"Equity RM",
+  founderyn:"Founder connect", ranking:"Founder ranking", iosa:"Inside / Outside", networth:"Net worth", dbsource:"Database source" };
+$("listBtn").onclick = () => { $("listSel").innerHTML = Object.keys(LIST_LABELS).map(k => `<option value="${k}">${esc(LIST_LABELS[k])}</option>`).join(""); drawList(); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listSel").onchange = drawList;
+function drawList(){
+  const k = $("listSel").value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  $("listItems").innerHTML = items.map(i => `<li><span>${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span><a href="#" data-id="${i.id}">${i.active ? "Turn off" : "Turn on"}</a></li>`).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+  document.querySelectorAll("#listItems [data-id]").forEach(a => a.onclick = async e => { e.preventDefault();
+    const it = lookups.find(l => String(l.id) === a.dataset.id);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; drawList(); });
+}
+$("listAdd").onclick = async () => {
+  const k = $("listSel").value, v = $("listNew").value.trim(); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: MOD, list_key: k, value: v, sort: lookups.filter(l => l.list_key === k).length }).select().single();
+  if (r.error){ toast(r.error.message); return; }
+  lookups.push(r.data); $("listNew").value = ""; drawList(); toast("Added ✓");
 };
 
 /* ---------- field access (module admin) ---------- */

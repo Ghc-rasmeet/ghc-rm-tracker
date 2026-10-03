@@ -64,7 +64,7 @@
       <div><label>Main policy holder</label><input id="pHolder" placeholder="defaults to client name"></div>
       <div><label>Holder date of birth</label><input id="pHolderDob" type="date"><div id="pHolderAgeTxt" style="font-size:12px;color:var(--muted);margin-top:2px"></div></div>
       <div style="grid-column:1/-1"><label>Other members covered <button class="btn ghost small" id="memAdd" style="margin-left:8px">+ Add</button></label><div id="memList"></div></div>
-      <div><label>Plan name</label><input id="pPlan"></div>
+      <div><label>Plan name <button class="btn ghost small hidden" id="addPlan" style="padding:2px 8px;font-size:11px">+ add</button></label><select id="pPlan"></select></div>
       <div><label>Basic sum assured</label><input id="pSum" type="number" min="0"></div>
       <div><label>Existing bonus</label><input id="pExBonus" type="number" min="0"></div>
       <div><label>Bonus</label><input id="pBonus" type="number" min="0"></div>
@@ -77,7 +77,7 @@
       <div><label>Collection date</label><input id="pColDate" type="date"></div>
       <div><label>Collection amount</label><input id="pColAmt" type="number" min="0"></div>
       <div><label>Next due date</label><input id="pDue" type="date"></div>
-      <div><label>RM</label><select id="pRm"><option value="">— none —</option></select></div>
+      <div><label>RM <button class="btn ghost small hidden" id="addRm" style="padding:2px 8px;font-size:11px">+ add</button></label><select id="pRm"><option value="">— none —</option></select></div>
     </div>
     <label class="toggle" style="margin-top:10px"><input type="checkbox" id="pService"> Service only (no sale)</label>
     <h3 style="margin-top:18px">Nominees <button class="btn ghost small" id="nomAdd" style="margin-left:8px">+ Add</button></h3>
@@ -132,7 +132,9 @@
 <div id="busy" class="hidden"><div class="sp"></div><div id="busyTxt">Working…</div></div>
 
 <script>
-let ctx, types = [], iclients = [], policies = [], nominees = [], members = [], files = [], touchClients = [];
+let ctx, types = [], iclients = [], policies = [], nominees = [], members = [], files = [], touchClients = [], lookups = [];
+const opts = key => lookups.filter(l => l.list_key === key && l.active).sort((a,b) => a.sort - b.sort).map(l => l.value);
+const isAdm = () => ctx.isSuper || ctx.level === "admin";
 let filter = { q: "", type: "", kind: "", stat: "all", sort: "due", dir: 1 }, page = 1, pageSize = 100, editingId = null, openId = null;
 const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
 
@@ -148,6 +150,7 @@ const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
 
 async function load(){
   types = await fetchAll("ins_types", "id, name, active", { col: "name" });
+  try { lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === "insurance"); } catch (e){ lookups = []; }
   iclients = await fetchAll("ins_clients", "id, pan, name, phone, email, client_id");
   policies = await fetchAll("policies", "*", { col: "created_at", asc: false });
   nominees = await fetchAll("policy_nominees", "id, policy_id, name, relation, share");
@@ -156,14 +159,16 @@ async function load(){
   try { touchClients = await fetchAll("clients", "id, name, pan, client_code"); } catch (e){ touchClients = []; }
   $("fType").innerHTML = `<option value="">All types</option>` + types.filter(t => t.active).map(t => `<option>${esc(t.name)}</option>`).join("");
   $("pType").innerHTML = types.filter(t => t.active).map(t => `<option>${esc(t.name)}</option>`).join("");
-  $("pRm").innerHTML = `<option value="">— none —</option>` + ctx.profiles.slice().sort((a,b) => a.full_name.localeCompare(b.full_name)).map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
+  $("pRm").innerHTML = `<option value="">— none —</option>` + opts("rm").map(o => `<option>${esc(o)}</option>`).join("");
+  $("pPlan").innerHTML = `<option value=""></option>` + opts("plan").map(o => `<option>${esc(o)}</option>`).join("");
+  if (isAdm()){ $("addPlan").classList.remove("hidden"); $("addRm").classList.remove("hidden"); }
 }
 
 /* ===== derived ===== */
 function enrich(){
   const cmap = Object.fromEntries(iclients.map(c => [c.id, c])), pmap = Object.fromEntries(ctx.profiles.map(p => [p.id, p.full_name]));
   const t = today(), d7 = addDays(t, 7), d30 = addDays(t, 30);
-  return policies.map(p => { const c = cmap[p.ins_client_id] || {}; return { ...p, client: c, rmName: pmap[p.rm_id] || "",
+  return policies.map(p => { const c = cmap[p.ins_client_id] || {}; return { ...p, client: c, rmName: p.rm_name || pmap[p.rm_id] || "",
     due7: p.next_due && p.next_due >= t && p.next_due <= d7, due30: p.next_due && p.next_due >= t && p.next_due <= d30,
     overdue: p.next_due && p.next_due < t }; });
 }
@@ -222,7 +227,7 @@ function memRow(m = {}){ const d = document.createElement("div"); d.className = 
   const dob = d.querySelectorAll("input")[2]; dob.oninput = () => { const a = ageFrom(dob.value); d.querySelector(".age").textContent = a == null ? "" : a + "y"; };
   d.querySelector("button").onclick = () => d.remove(); $("memList").appendChild(d); }
 function nomRow(n = {}){ const d = document.createElement("div"); d.className = "nomrow";
-  d.innerHTML = `<input placeholder="Nominee name" value="${esc(n.name || "")}"><input placeholder="Relation" value="${esc(n.relation || "")}"><input type="number" placeholder="%" value="${n.share ?? ""}"><button title="remove">×</button>`;
+  d.innerHTML = `<input placeholder="Nominee name" value="${esc(n.name || "")}"><select>` + `<option value=""></option>` + opts("nomrel").map(o => `<option ${n.relation === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select><input type="number" placeholder="%" value="${n.share ?? ""}"><button title="remove">×</button>`;
   d.querySelector("button").onclick = () => d.remove(); $("nomList").appendChild(d); }
 $("nomAdd").onclick = () => nomRow();
 $("memAdd").onclick = () => memRow();
@@ -231,7 +236,7 @@ function fillForm(p, c){
   $("pType").value = p?.type || (types.find(t => t.active) || {}).name || ""; $("pNo").value = p?.policy_no || ""; $("pKind").value = p?.kind || "fresh"; $("pPlan").value = p?.plan_name || "";
   $("pSum").value = p?.sum_assured ?? ""; $("pExBonus").value = p?.existing_bonus ?? ""; $("pBonus").value = p?.bonus ?? "";
   $("pFrom").value = p?.valid_from || ""; $("pTo").value = p?.valid_to || ""; delete $("pDue").dataset.touched; $("pColDate").value = p?.collection_date || today(); $("pColAmt").value = p?.collection_amt ?? ""; $("pDue").value = p?.next_due || "";
-  $("pRm").value = p?.rm_id || ""; $("pService").checked = !!p?.service_only; $("pNote").value = p?.narration || ""; $("pFile").value = ""; $("pErr").textContent = "";
+  $("pRm").value = p?.rm_name || ""; $("pService").checked = !!p?.service_only; $("pNote").value = p?.narration || ""; $("pFile").value = ""; $("pErr").textContent = "";
   $("pHolder").value = p?.holder_name || c?.name || ""; $("pHolderDob").value = p?.holder_dob || "";
   $("pHolderAgeTxt").textContent = p?.holder_dob ? ageFrom(p.holder_dob) + " years" : (p?.holder_age ? p.holder_age + " years" : "");
   $("nomList").innerHTML = ""; (p ? nominees.filter(n => n.policy_id === p.id) : []).forEach(nomRow);
@@ -285,7 +290,7 @@ $("pSave").onclick = async () => {
     const num = id => $(id).value === "" ? null : +$(id).value;
     const prec = { ins_client_id: c.id, type: $("pType").value, policy_no: pno, kind: $("pKind").value, plan_name: $("pPlan").value.trim() || null,
       sum_assured: num("pSum"), existing_bonus: num("pExBonus"), bonus: num("pBonus"), valid_from: $("pFrom").value || null, valid_to: $("pTo").value || null,
-      collection_date: $("pColDate").value || null, collection_amt: num("pColAmt"), next_due: $("pDue").value || null, rm_id: $("pRm").value || null,
+      collection_date: $("pColDate").value || null, collection_amt: num("pColAmt"), next_due: $("pDue").value || null, rm_name: $("pRm").value || null,
       service_only: $("pService").checked, narration: $("pNote").value.trim() || null,
       holder_name: $("pHolder").value.trim() || name, holder_dob: $("pHolderDob").value || null, holder_age: ageFrom($("pHolderDob").value) };
     let p;
@@ -293,7 +298,7 @@ $("pSave").onclick = async () => {
       await sb.from("policy_members").delete().eq("policy_id", p.id); members = members.filter(m => m.policy_id !== p.id); }
     else { const r = await sb.from("policies").insert({ ...prec, created_by: ctx.me.id }).select().single(); if (r.error) throw r.error; p = r.data; policies.unshift(p); }
     // nominees
-    const noms = [...document.querySelectorAll("#nomList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, share: i[2].value === "" ? null : +i[2].value }; }).filter(n => n.name);
+    const noms = [...document.querySelectorAll("#nomList .nomrow")].map(d => { const i = d.querySelectorAll("input"), sel = d.querySelector("select"); return { policy_id: p.id, name: i[0].value.trim(), relation: sel ? (sel.value || null) : null, share: i[1].value === "" ? null : +i[1].value }; }).filter(n => n.name);
     if (noms.length){ const r = await sb.from("policy_nominees").insert(noms).select(); if (r.error) throw r.error; nominees.push(...r.data); }
     const mems = [...document.querySelectorAll("#memList .nomrow")].map(d => { const i = d.querySelectorAll("input"); return { policy_id: p.id, name: i[0].value.trim(), relation: i[1].value.trim() || null, dob: i[2].value || null, age: ageFrom(i[2].value) }; }).filter(m => m.name);
     if (mems.length){ const r = await sb.from("policy_members").insert(mems).select(); if (r.error) throw r.error; members.push(...r.data); }
@@ -311,6 +316,15 @@ $("pSave").onclick = async () => {
   } catch (e){ $("busy").classList.add("hidden"); $("pErr").textContent = "Could not save: " + e.message; }
   $("pSave").disabled = false;
 };
+
+async function addToList(key, sel){
+  const v = prompt("Add an option to this list:"); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: "insurance", list_key: key, value: v.trim(), sort: lookups.filter(l => l.list_key === key).length }).select().single();
+  if (r.error){ alert(r.error.message); return; }
+  lookups.push(r.data); const o = document.createElement("option"); o.textContent = v.trim(); $(sel).appendChild(o); $(sel).value = v.trim(); toast("Added ✓");
+}
+$("addPlan").onclick = e => { e.preventDefault(); addToList("plan", "pPlan"); };
+$("addRm").onclick = e => { e.preventDefault(); addToList("rm", "pRm"); };
 
 /* ===== report ===== */
 let repRows = [];

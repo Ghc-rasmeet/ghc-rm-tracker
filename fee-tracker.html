@@ -100,11 +100,11 @@
 </div>
 
 <script>
-const FIELDS = [{"k": "student_id", "l": "Student ID", "t": "text", "g": "Student"}, {"k": "course_id", "l": "Course ID", "t": "text", "g": "Student"}, {"k": "student_name", "l": "Student Name", "t": "text", "g": "Student"}, {"k": "phone_no", "l": "Phone No", "t": "phone", "g": "Student"}, {"k": "main_course", "l": "Main Course", "t": "list:course", "g": "Course"}, {"k": "source", "l": "Source", "t": "list:source", "g": "Course"}, {"k": "source_reference", "l": "Source Reference", "t": "text", "g": "Course"}, {"k": "mode_of_connect", "l": "Mode of connect", "t": "text", "g": "Course"}, {"k": "reg_quarter", "l": "Registration Quarter", "t": "list:quarter", "g": "Course"}, {"k": "actual_fees", "l": "Actual Fees", "t": "number", "g": "Fees"}, {"k": "final_fees", "l": "Final Fees", "t": "number", "g": "Fees"}, {"k": "collection_date_1", "l": "Collection Date 1", "t": "date", "g": "Instalment 1"}, {"k": "received_1", "l": "Received 1", "t": "number", "g": "Instalment 1"}, {"k": "status_1", "l": "Mode & Confirmation (1)", "t": "list:paystatus", "g": "Instalment 1"}, {"k": "collection_date_2", "l": "Collection Date 2", "t": "date", "g": "Instalment 2"}, {"k": "received_2", "l": "Received 2", "t": "number", "g": "Instalment 2"}, {"k": "status_2", "l": "Mode & Confirmation (2)", "t": "list:paystatus", "g": "Instalment 2"}, {"k": "collection_date_3", "l": "Collection Date 3", "t": "date", "g": "Instalment 3"}, {"k": "received_3", "l": "Received 3", "t": "number", "g": "Instalment 3"}, {"k": "status_3", "l": "Mode & Confirmation (3)", "t": "list:paystatus", "g": "Instalment 3"}, {"k": "relationship_discount", "l": "Relationship Discount", "t": "number", "g": "Adjustment"}, {"k": "discount_reason", "l": "Discount Reason", "t": "list:discount", "g": "Adjustment"}, {"k": "rm", "l": "RM", "t": "list:rm", "g": "Ownership"}, {"k": "bs_intro", "l": "Build Specialist \u2013 Intro", "t": "list:bsintro", "g": "Ownership"}, {"k": "bs_deep", "l": "Build Specialist \u2013 Deep", "t": "list:bsdeep", "g": "Ownership"}, {"k": "support", "l": "Support", "t": "list:yesno", "g": "Ownership"}, {"k": "internal_support", "l": "Internal Support", "t": "list:yesno", "g": "Ownership"}];
+const FIELDS = [{"k": "student_id", "l": "Student ID", "t": "text", "g": "Student"}, {"k": "course_id", "l": "Course ID", "t": "text", "g": "Student"}, {"k": "student_name", "l": "Student Name", "t": "text", "g": "Student"}, {"k": "phone_no", "l": "Phone No", "t": "phone", "g": "Student"}, {"k": "main_course", "l": "Main Course", "t": "list:course", "g": "Course"}, {"k": "sub_course", "l": "Sub Course", "t": "list:subcourse", "g": "Course"}, {"k": "source", "l": "Source", "t": "list:source", "g": "Course"}, {"k": "source_reference", "l": "Source Reference", "t": "text", "g": "Course"}, {"k": "mode_of_connect", "l": "Mode of connect", "t": "text", "g": "Course"}, {"k": "reg_quarter", "l": "Registration Quarter", "t": "list:quarter", "g": "Course"}, {"k": "actual_fees", "l": "Actual Fees", "t": "number", "g": "Fees"}, {"k": "final_fees", "l": "Final Fees", "t": "number", "g": "Fees"}, {"k": "collection_date_1", "l": "Collection Date 1", "t": "date", "g": "Instalment 1"}, {"k": "received_1", "l": "Received 1", "t": "number", "g": "Instalment 1"}, {"k": "status_1", "l": "Mode & Confirmation (1)", "t": "list:paystatus", "g": "Instalment 1"}, {"k": "collection_date_2", "l": "Collection Date 2", "t": "date", "g": "Instalment 2"}, {"k": "received_2", "l": "Received 2", "t": "number", "g": "Instalment 2"}, {"k": "status_2", "l": "Mode & Confirmation (2)", "t": "list:paystatus", "g": "Instalment 2"}, {"k": "collection_date_3", "l": "Collection Date 3", "t": "date", "g": "Instalment 3"}, {"k": "received_3", "l": "Received 3", "t": "number", "g": "Instalment 3"}, {"k": "status_3", "l": "Mode & Confirmation (3)", "t": "list:paystatus", "g": "Instalment 3"}, {"k": "relationship_discount", "l": "Relationship Discount", "t": "number", "g": "Adjustment"}, {"k": "discount_reason", "l": "Discount Reason", "t": "list:discount", "g": "Adjustment"}, {"k": "rm", "l": "RM", "t": "list:rm", "g": "Ownership"}, {"k": "bs_intro", "l": "Build Specialist \u2013 Intro", "t": "list:bsintro", "g": "Ownership"}, {"k": "bs_deep", "l": "Build Specialist \u2013 Deep", "t": "list:bsdeep", "g": "Ownership"}, {"k": "support", "l": "Support", "t": "list:yesno", "g": "Ownership"}, {"k": "internal_support", "l": "Internal Support", "t": "list:yesno", "g": "Ownership"}];
 const GROUPS = ["Student", "Course", "Fees", "Instalment 1", "Instalment 2", "Instalment 3", "Adjustment", "Ownership"];
 const MOD = "supp_fee";
 const NUMS = ["actual_fees","final_fees","received_1","received_2","received_3","relationship_discount"];
-const LIST_LABELS = { course:"Main course", source:"Source", quarter:"Quarter", paystatus:"Mode & confirmation", discount:"Discount reason", rm:"RM", bsintro:"Build Specialist – Intro", bsdeep:"Build Specialist – Deep", yesno:"Yes / No" };
+const LIST_LABELS = { course:"Main course", subcourse:"Sub course", source:"Source", quarter:"Quarter", paystatus:"Mode & confirmation", discount:"Discount reason", rm:"RM", bsintro:"Build Specialist – Intro", bsdeep:"Build Specialist – Deep", yesno:"Yes / No" };
 let ctx, rows = [], logs = [], lookups = [], fperm = {}, feat = {}, allPerms = [], allFeatPerms = [];
 let filter = { q: "", course: "", rm: "", qtr: "", stat: "", sort: "student_name", dir: 1 }, page = 1, pageSize = 100, editingId = null;
 const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
@@ -130,6 +130,7 @@ async function load(){
   try { (await fetchAll("field_perms","module, field_key, user_id, level")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) fperm[r.field_key] = r.level; allPerms.push(r); }); } catch (e){}
   try { (await fetchAll("feature_perms","module, feature_key, user_id, allowed")).forEach(r => { if (r.module === MOD && r.user_id === ctx.me.id) feat[r.feature_key] = r.allowed; allFeatPerms.push(r); }); } catch (e){}
   lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === MOD);
+  try { (await fetchAll("module_fields","module, field_key, label, ftype")).filter(f => f.module === MOD).forEach(f => { const x = FIELDS.find(y => y.k === f.field_key); if (x){ if (f.ftype) x.t = f.ftype; if (f.label) x.l = f.label; } }); } catch (e){}
   rows = await fetchAll("fee_view", "*");
   if (F("view_log")){ try { logs = await fetchAll("fee_log","*",{ col: "at", asc: false }); } catch (e){ logs = []; } }
   $("fCourse").innerHTML = `<option value="">All courses</option>` + opts("course").map(o => `<option>${esc(o)}</option>`).join("");
@@ -212,12 +213,22 @@ function open(id){
     return `<h3 style="margin-top:16px">${esc(g)}</h3><div class="grid2">` + fs.map(f => {
       const ro = P(f.k) !== "edit" || !canEdit(), v = r ? (r[f.k] ?? "") : "";
       let input;
+      let add = "";
       if (f.t.startsWith("list:")){ const key = f.t.slice(5);
-        input = `<select id="f_${f.k}" ${ro ? "disabled" : ""}><option value=""></option>` + opts(key).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`; }
+        input = `<select id="f_${f.k}" ${ro ? "disabled" : ""}><option value=""></option>` + opts(key).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+        if (ctx.isSuper || ctx.level === "admin") add = ` <button class="btn ghost small" data-add="${key}" style="padding:2px 8px;font-size:11px">+ add</button>`; }
       else input = `<input id="f_${f.k}" type="${f.t === "date" ? "date" : f.t === "number" ? "number" : "text"}" value="${esc(v)}" ${ro ? "disabled" : ""}>`;
-      return `<div><label>${esc(f.l)}${ro ? ' <span style="color:var(--muted);font-weight:400">· read only</span>' : ""}</label>${input}</div>`;
+      return `<div><label>${esc(f.l)}${add}${ro ? ' <span style="color:var(--muted);font-weight:400">· read only</span>' : ""}</label>${input}</div>`;
     }).join("") + `</div>`;
   }).join("");
+  document.querySelectorAll("[data-add]").forEach(b => b.onclick = async ev => { ev.preventDefault();
+    const key = b.dataset.add, v = prompt("Add an option to this list:"); if (!v) return;
+    const res = await sb.from("lookup_values").insert({ module: MOD, list_key: key, value: v.trim(), sort: lookups.filter(l => l.list_key === key).length }).select().single();
+    if (res.error){ alert(res.error.message); return; }
+    lookups.push(res.data);
+    const sel = b.closest("div").querySelector("select");
+    const o = document.createElement("option"); o.textContent = v.trim(); sel.appendChild(o); sel.value = v.trim();
+    toast("Added ✓"); });
   ["final_fees","received_1","received_2","received_3","relationship_discount","collection_date_1","collection_date_2","collection_date_3"].forEach(k => { const el = $("f_" + k); if (el) el.oninput = recalc; });
   recalc();
   $("fSave").style.display = canEdit() ? "" : "none";
