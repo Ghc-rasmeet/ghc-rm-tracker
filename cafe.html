@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Café</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="common.js"></script>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="tabs" id="tabs">
+      <button class="on" data-t="orders">Orders</button>
+      <button data-t="menu">Menu</button>
+    </div>
+
+    <div id="tab-orders">
+      <div class="band"><div class="grp"><div class="rvhead">Orders</div><div class="stats" id="stats"></div></div></div>
+      <div class="controls">
+        <input id="q" class="grow" placeholder="Search order title or occasion">
+        <select id="fStatus" style="width:auto"><option value="">All statuses</option><option>draft</option><option>sent for approval</option><option>approved</option><option>ordered</option><option>cancelled</option></select>
+        <button class="btn small" id="newBtn">+ New order</button>
+        <button class="btn ghost small hidden" id="xlsBtn">Export</button>
+      </div>
+      <div class="tablewrap"><table><thead><tr>
+        <th class="sort" data-k="title">Order</th><th class="sort" data-k="occasion">Occasion</th>
+        <th class="sort" data-k="order_date">Date</th><th>Head count</th><th>Items</th>
+        <th class="sort" data-k="total">Approx total</th><th class="side">Status</th>
+      </tr></thead><tbody id="rows"></tbody></table>
+      <div class="empty hidden" id="empty">No orders yet. Build a sample order to see the cost before you send it for approval.</div></div>
+    </div>
+
+    <div id="tab-menu" class="hidden">
+      <div class="band"><div class="grp"><div class="rvhead">Menu</div><div class="stats" id="mstats"></div></div></div>
+      <div class="controls">
+        <input id="mq" class="grow" placeholder="Search food item or vendor">
+        <select id="mCat" style="width:auto"><option value="">All categories</option></select>
+        <button class="btn small hidden" id="newItemBtn">+ New item</button>
+        <button class="btn ghost small hidden" id="listBtn">Lists</button>
+        <button class="btn ghost small hidden" id="cfBtn">Extra fields</button>
+      </div>
+      <div class="tablewrap"><table><thead><tr><th>Food item</th><th>Vendor</th><th>Category</th><th>Price</th><th>Unit</th><th class="side"></th></tr></thead><tbody id="mrows"></tbody></table></div>
+      <p class="fml" style="margin-top:8px">Only an admin can add, change or delete menu items. Coordinators build orders from this list.</p>
+    </div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle">New order</h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+
+<div id="listModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:600px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Dropdown lists</h2>
+      <select id="listSel" style="width:auto"></select><button class="x" id="listClose">×</button></div>
+    <p class="fml" style="margin:8px 0 0">Delete only works when nothing uses the option.</p>
+    <ul id="listItems" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="listNew" placeholder="Add a new option"><button class="btn small" id="listAdd">Add</button></div>
+  </div>
+</div>
+
+<div id="cfModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:520px">
+    <div style="display:flex;align-items:center"><h2 style="margin:0">Extra fields</h2><button class="x" id="cfClose">×</button></div>
+    <p class="fml" style="margin:8px 0">Add your own fields to a food item — they appear at the bottom of the form.</p>
+    <ul id="cfList" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div class="grid2"><div><label>Field name</label><input id="cfLabel" placeholder="e.g. Shelf life"></div>
+      <div><label>Type</label><select id="cfType"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="yesno">Yes / No</option></select></div></div>
+    <button class="btn" id="cfAdd" style="margin-top:8px">Add field</button>
+  </div>
+</div>
+
+<script>
+const MOD = "cafe";
+let ctx, items = [], orders = [], lines = [], editingId = null, tab = "orders";
+let filter = { q: "", status: "", mq: "", cat: "", sort: "order_date", dir: -1 };
+/* ---- shared helpers for module pages ---- */
+let lookups = [], customFields = [], usage = {};
+const opts = key => lookups.filter(l => l.list_key === key && l.active).sort((a,b) => a.sort - b.sort).map(l => l.value);
+const isAdm = () => ctx.isSuper || ctx.level === "admin";
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+async function loadShared(mod){
+  try { lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === mod); } catch (e){ lookups = []; }
+  try { customFields = (await fetchAll("module_fields","module, field_key, label, ftype, grp, sort, is_custom")).filter(f => f.module === mod && f.is_custom).sort((a,b) => a.sort - b.sort); } catch (e){ customFields = []; }
+}
+function customInputs(rec){
+  if (!customFields.length) return "";
+  return `<h3 style="margin-top:16px">More details</h3><div class="grid2">` + customFields.map(f => {
+    const v = (rec && rec.extra && rec.extra[f.field_key]) ?? "";
+    let input;
+    if (f.ftype.startsWith("list:")) input = `<select id="x_${f.field_key}"><option value=""></option>` + opts(f.ftype.slice(5)).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+    else if (f.ftype === "yesno") input = `<select id="x_${f.field_key}"><option value=""></option><option ${v === "Yes" ? "selected" : ""}>Yes</option><option ${v === "No" ? "selected" : ""}>No</option></select>`;
+    else input = `<input id="x_${f.field_key}" type="${f.ftype === "date" ? "date" : f.ftype === "number" ? "number" : "text"}" value="${esc(v)}">`;
+    return `<div><label>${esc(f.label)}</label>${input}</div>`;
+  }).join("") + `</div>`;
+}
+function customValues(){
+  const o = {};
+  customFields.forEach(f => { const el = $("x_" + f.field_key); if (el && el.value !== "") o[f.field_key] = el.value; });
+  return o;
+}
+/* custom field manager */
+function fieldMgr(mod){
+  $("cfList").innerHTML = customFields.map(f => `<li><span>${esc(f.label)} <span style="color:var(--muted);font-size:12px">· ${esc(f.ftype)}</span></span>
+    <a href="#" data-cfdel="${f.field_key}" style="color:var(--warn)">Remove</a></li>`).join("") || `<li style="color:var(--muted)">No extra fields yet.</li>`;
+  document.querySelectorAll("[data-cfdel]").forEach(a => a.onclick = async e => { e.preventDefault();
+    if (!confirm("Remove this field? Values already entered stay in the record but stop being shown.")) return;
+    const r = await sb.from("module_fields").delete().eq("module", mod).eq("field_key", a.dataset.cfdel);
+    if (r.error){ alert(r.error.message); return; }
+    customFields = customFields.filter(f => f.field_key !== a.dataset.cfdel); fieldMgr(mod); toast("Removed"); });
+}
+async function addCustomField(mod){
+  const label = $("cfLabel").value.trim(); if (!label){ toast("Give the field a name"); return; }
+  const key = "x_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const r = await sb.from("module_fields").insert({ module: mod, field_key: key, label, ftype: $("cfType").value, grp: "More details", sort: 900 + customFields.length, is_custom: true }).select().single();
+  if (r.error){ alert(r.error.message); return; }
+  customFields.push(r.data); $("cfLabel").value = ""; fieldMgr(mod); toast("Field added ✓");
+}
+
+/* ===== shared list manager (v6.4) ===== */
+async function lmLoadUsage(mod){
+  try { const { data, error } = await sb.rpc("lookup_usage", { m: mod }); if (error) throw error;
+    const u = {}; (data || []).forEach(r => u[r.list_key + "||" + r.value] = +r.uses); return u; } catch (e){ return {}; }
+}
+function lmNorm(s){ return (s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function lmRender(cfg){
+  const { mod, listSel, itemsEl, labels, lookups, usage, onChange } = cfg;
+  const k = listSel.value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  const dupe = {}; items.forEach(i => { const n = lmNorm(i.value); (dupe[n] ||= []).push(i.value); });
+  itemsEl.innerHTML = items.map(i => {
+    const n = usage[k + "||" + i.value] || 0;
+    const isDupe = dupe[lmNorm(i.value)].length > 1;
+    const count = n ? `<span class="pill ${isDupe ? "hot" : "talk"}">${n} record${n === 1 ? "" : "s"}${isDupe ? " · looks duplicate" : ""}</span>`
+                    : `<span style="color:var(--muted);font-size:12px">not used${isDupe ? " · looks duplicate" : ""}</span>`;
+    return `<li style="align-items:center;gap:10px">
+      <span style="flex:1">${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span>
+      ${count}
+      ${isDupe ? `<button class="btn ghost small" data-merge="${esc(i.value)}">Merge</button>` : ""}
+      <button class="btn ghost small" data-toggle="${i.id}">${i.active ? "Turn off" : "Turn on"}</button>
+      <button class="btn ghost small" data-del="${esc(i.value)}" ${n ? `disabled title="Used by ${n} record${n === 1 ? "" : "s"} — merge it first" style="opacity:.45"` : 'style="color:var(--warn);border-color:var(--warn)"'}>Delete</button>
+    </li>`;
+  }).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+
+  itemsEl.querySelectorAll("[data-toggle]").forEach(b => b.onclick = async () => {
+    const it = lookups.find(l => String(l.id) === b.dataset.toggle);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; lmRender(cfg); onChange && onChange();
+  });
+  itemsEl.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const v = b.dataset.del;
+    if (!confirm(`Delete "${v}" from this list? It cannot be undone.`)) return;
+    const { error } = await sb.rpc("lookup_delete", { m: mod, lk: k, v });
+    if (error){ alert(error.message); return; }
+    const i = lookups.findIndex(l => l.list_key === k && l.value === v); if (i >= 0) lookups.splice(i, 1);
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange(); toast("Deleted ✓");
+  });
+  itemsEl.querySelectorAll("[data-merge]").forEach(b => b.onclick = async () => {
+    const from = b.dataset.merge;
+    const others = dupe[lmNorm(from)].filter(v => v !== from);
+    const to = prompt(`Move every record from "${from}" into which option?\n\n${others.join("\n")}`, others[0]);
+    if (!to) return;
+    const { data, error } = await sb.rpc("lookup_merge", { m: mod, lk: k, from_value: from, to_value: to });
+    if (error){ alert(error.message); return; }
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange();
+    toast(`${data || 0} record${data === 1 ? "" : "s"} moved to "${to}" — you can delete the old one now`, 4000);
+  });
+}
+
+
+(async () => {
+  ctx = await requireAuth(MOD); if (!ctx) return;
+  shellHeader("Café", ctx);
+  await loadShared(MOD); await load();
+  $("app").classList.remove("hidden");
+  if (!canEdit()) $("newBtn").classList.add("hidden");
+  if (isAdm()){ ["newItemBtn","listBtn","cfBtn","xlsBtn"].forEach(i => $(i).classList.remove("hidden")); }
+  render();
+})();
+
+async function load(){
+  items = await fetchAll("cafe_items", "*", { col: "name" });
+  orders = await fetchAll("cafe_orders", "*", { col: "order_date", asc: false });
+  lines = await fetchAll("cafe_order_lines", "*");
+  $("mCat").innerHTML = `<option value="">All categories</option>` + opts("category").map(o => `<option>${esc(o)}</option>`).join("");
+}
+
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  tab = b.dataset.t; $("tab-orders").classList.toggle("hidden", tab !== "orders"); $("tab-menu").classList.toggle("hidden", tab !== "menu");
+});
+
+function render(){
+  const tile = (k, l, v, cls = "") => `<div class="stat ${cls}"><b>${v}</b><span>${l}</span></div>`;
+  const m0 = today().slice(0,7);
+  $("stats").innerHTML = tile("", "Orders", orders.length) +
+    tile("", "Draft", orders.filter(o => o.status === "draft").length, "amb") +
+    tile("", "Awaiting approval", orders.filter(o => o.status === "sent for approval").length, "red") +
+    tile("", "Spend this month", inr(orders.filter(o => (o.order_date||"").startsWith(m0) && ["approved","ordered"].includes(o.status)).reduce((s,o) => s + (+o.total||0), 0)), "pct");
+  $("mstats").innerHTML = tile("", "Food items", items.length) + tile("", "Vendors", new Set(items.map(i => i.vendor).filter(Boolean)).size) +
+    tile("", "Average price", inr(Math.round(items.reduce((s,i) => s + (+i.price||0), 0) / (items.length || 1))));
+
+  let list = orders.slice();
+  if (filter.status) list = list.filter(o => o.status === filter.status);
+  const q = filter.q.toLowerCase();
+  if (q) list = list.filter(o => [o.title, o.occasion, o.note].some(v => (v||"").toLowerCase().includes(q)));
+  list.sort((a,b) => { const x = a[filter.sort] ?? "", y = b[filter.sort] ?? ""; return x < y ? -filter.dir : x > y ? filter.dir : 0; });
+  $("rows").innerHTML = list.map(o => { const n = lines.filter(l => l.order_id === o.id).length;
+    const col = { draft: "talk", "sent for approval": "hot", approved: "done", ordered: "done", cancelled: "cold" }[o.status] || "talk";
+    return `<tr class="row" data-id="${o.id}"><td>${esc(o.title)}</td><td>${esc(o.occasion||"")}</td><td>${fmtY(o.order_date)}</td>
+      <td>${o.head_count ?? "—"}</td><td>${n}</td><td><b>${inr(o.total)}</b></td><td class="side"><span class="pill ${col}">${esc(o.status)}</span></td></tr>`; }).join("");
+  $("empty").classList.toggle("hidden", list.length > 0);
+  document.querySelectorAll("#rows tr.row").forEach(el => el.onclick = () => openOrder(el.dataset.id));
+  document.querySelectorAll("th.sort").forEach(th => th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); });
+
+  let ml = items.slice();
+  if (filter.cat) ml = ml.filter(i => i.category === filter.cat);
+  const mq = filter.mq.toLowerCase();
+  if (mq) ml = ml.filter(i => [i.name, i.vendor].some(v => (v||"").toLowerCase().includes(mq)));
+  $("mrows").innerHTML = ml.map(i => `<tr><td>${esc(i.name)}${i.active ? "" : ' <span class="pill cold">off</span>'}</td><td>${esc(i.vendor||"")}</td>
+    <td>${esc(i.category||"")}</td><td>${inr(i.price)}</td><td>${esc(i.unit||"")}</td>
+    <td class="side" style="white-space:nowrap">${isAdm() ? `<button class="btn ghost small" data-ed="${i.id}">Edit</button> <button class="btn ghost small" data-del="${i.id}" style="color:var(--warn);border-color:var(--warn)">Delete</button>` : ""}</td></tr>`).join("");
+  document.querySelectorAll("[data-ed]").forEach(b => b.onclick = () => openItem(b.dataset.ed));
+  document.querySelectorAll("#mrows [data-del]").forEach(b => b.onclick = async () => {
+    const used = lines.filter(l => l.item_id === b.dataset.del).length;
+    if (used){ alert(`This item appears in ${used} order line(s). Turn it off instead of deleting.`); return; }
+    if (!confirm("Delete this food item?")) return;
+    const r = await sb.from("cafe_items").delete().eq("id", b.dataset.del);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); render(); toast("Deleted");
+  });
+}
+$("q").oninput = e => { filter.q = e.target.value; render(); };
+$("fStatus").onchange = e => { filter.status = e.target.value; render(); };
+$("mq").oninput = e => { filter.mq = e.target.value; render(); };
+$("mCat").onchange = e => { filter.cat = e.target.value; render(); };
+
+/* ---------- menu item drawer ---------- */
+function openItem(id){
+  const it = id ? items.find(x => x.id === id) : null; editingId = id || null;
+  $("dTitle").textContent = it ? it.name : "New food item"; $("dMeta").textContent = "Menu";
+  $("dbody").innerHTML = `<div class="grid2">
+    <div style="grid-column:1/-1"><label>Food item</label><input id="iName" value="${esc(it?.name || "")}"></div>
+    <div><label>Vendor <button class="btn ghost small" data-add="vendor" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="iVendor"><option value=""></option>${opts("vendor").map(o => `<option ${it?.vendor === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Category <button class="btn ghost small" data-add="category" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="iCat"><option value=""></option>${opts("category").map(o => `<option ${it?.category === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Price</label><input id="iPrice" type="number" min="0" value="${it?.price ?? ""}"></div>
+    <div><label>Unit</label><input id="iUnit" value="${esc(it?.unit || "plate")}" placeholder="plate, piece, kg"></div>
+    </div>
+    <label>Note</label><textarea id="iNote" rows="2">${esc(it?.note || "")}</textarea>
+    <label class="toggle"><input type="checkbox" id="iActive" ${it ? (it.active ? "checked" : "") : "checked"}> Available</label>
+    ${customInputs(it)}
+    <div class="err" id="iErr"></div>
+    <div style="display:flex;gap:10px;margin-top:8px"><button class="btn" id="iSave">Save</button></div>`;
+  wireAdds();
+  $("iSave").onclick = async () => {
+    const name = $("iName").value.trim(); if (!name){ $("iErr").textContent = "Name is needed."; return; }
+    const rec = { name, vendor: $("iVendor").value || null, category: $("iCat").value || null,
+      price: $("iPrice").value === "" ? null : +$("iPrice").value, unit: $("iUnit").value.trim() || null,
+      note: $("iNote").value.trim() || null, active: $("iActive").checked, extra: customValues() };
+    const r = editingId ? await sb.from("cafe_items").update(rec).eq("id", editingId)
+                        : await sb.from("cafe_items").insert({ ...rec, created_by: ctx.me.id });
+    if (r.error){ $("iErr").textContent = r.error.message; return; }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  };
+  show();
+}
+$("newItemBtn").onclick = () => openItem(null);
+
+/* ---------- order drawer ---------- */
+function orderLinesHtml(ls){
+  return ls.map((l, idx) => `<div class="nomrow" data-ln="${idx}" style="grid-template-columns:2fr 70px 90px 90px 30px">
+    <select data-f="item">${items.filter(i => i.active || i.id === l.item_id).map(i => `<option value="${i.id}" ${i.id === l.item_id ? "selected" : ""}>${esc(i.name)}${i.vendor ? " · " + esc(i.vendor) : ""}</option>`).join("")}</select>
+    <input data-f="qty" type="number" min="0" step="1" value="${l.qty ?? 1}">
+    <span data-f="price" style="font-size:13px;color:var(--muted);text-align:right">${inr(l.price)}</span>
+    <span data-f="amt" style="font-size:13px;font-weight:500;text-align:right">${inr((+l.price||0) * (+l.qty||0))}</span>
+    <button title="remove">×</button></div>`).join("");
+}
+function recalcOrder(){
+  let total = 0;
+  document.querySelectorAll("#lineList .nomrow").forEach(d => {
+    const it = items.find(i => i.id === d.querySelector("[data-f=item]").value);
+    const qty = +d.querySelector("[data-f=qty]").value || 0, price = +(it?.price || 0);
+    d.querySelector("[data-f=price]").textContent = inr(price);
+    d.querySelector("[data-f=amt]").textContent = inr(price * qty);
+    total += price * qty;
+  });
+  $("oTotal").textContent = inr(total);
+  const hc = +$("oHead").value || 0;
+  $("oPer").textContent = hc ? inr(Math.round(total / hc)) + " per head" : "";
+}
+function wireLines(){
+  document.querySelectorAll("#lineList .nomrow").forEach(d => {
+    d.querySelector("button").onclick = () => { d.remove(); recalcOrder(); };
+    d.querySelectorAll("select,input").forEach(el => el.oninput = el.onchange = recalcOrder);
+  });
+}
+function openOrder(id){
+  const o = id ? orders.find(x => x.id === id) : null; editingId = id || null;
+  const ls = o ? lines.filter(l => l.order_id === o.id) : [];
+  $("dTitle").textContent = o ? o.title : "New order"; $("dMeta").textContent = o ? `${o.status} · ${inr(o.total)}` : "Sample order";
+  const ro = !canEdit();
+  $("dbody").innerHTML = `<div class="grid2">
+    <div style="grid-column:1/-1"><label>Order title</label><input id="oTitle" value="${esc(o?.title || "")}" placeholder="e.g. Diwali team lunch" ${ro ? "disabled" : ""}></div>
+    <div><label>Occasion <button class="btn ghost small" data-add="occasion" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="oOcc" ${ro ? "disabled" : ""}><option value=""></option>${opts("occasion").map(x => `<option ${o?.occasion === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></div>
+    <div><label>Date</label><input id="oDate" type="date" value="${o?.order_date || today()}" ${ro ? "disabled" : ""}></div>
+    <div><label>Head count</label><input id="oHead" type="number" min="0" value="${o?.head_count ?? ""}" ${ro ? "disabled" : ""}></div>
+    <div><label>Status</label><select id="oStatus" ${ro ? "disabled" : ""}>${["draft","sent for approval","approved","ordered","cancelled"].map(x => `<option ${o?.status === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+  </div>
+  <h3 style="margin-top:16px">Items <button class="btn ghost small" id="addLine" ${ro ? "disabled" : ""} style="margin-left:8px">+ Add item</button></h3>
+  <div id="lineList">${orderLinesHtml(ls)}</div>
+  <div style="margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#eef3f8;display:flex;justify-content:space-between;align-items:baseline">
+    <span style="font-size:13px;color:var(--muted)">Approximate total <span id="oPer" style="margin-left:10px"></span></span>
+    <b id="oTotal" style="font-size:20px">₹0</b></div>
+  <label>Note</label><textarea id="oNote" rows="2" ${ro ? "disabled" : ""}>${esc(o?.note || "")}</textarea>
+  <div class="err" id="oErr"></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+    ${ro ? "" : `<button class="btn" id="oSave">Save</button>`}
+    ${o ? `<button class="btn blue" id="oPdf">Download PDF</button>` : ""}
+    ${o && canEdit() ? `<button class="btn ghost" id="oDel" style="color:var(--warn);border-color:var(--warn)">Delete order</button>` : ""}
+  </div>`;
+  wireAdds(); wireLines(); recalcOrder();
+  $("oHead").oninput = recalcOrder;
+  $("addLine").onclick = () => { if (!items.length){ toast("Add food items to the menu first"); return; }
+    $("lineList").insertAdjacentHTML("beforeend", orderLinesHtml([{ item_id: items[0].id, qty: 1, price: items[0].price }])); wireLines(); recalcOrder(); };
+  if ($("oSave")) $("oSave").onclick = saveOrder;
+  if ($("oPdf")) $("oPdf").onclick = () => orderPdf(o);
+  if ($("oDel")) $("oDel").onclick = async () => {
+    if (!confirm("Delete this order and its items?")) return;
+    const r = await sb.from("cafe_orders").delete().eq("id", editingId);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); closeDrawer(); render(); toast("Deleted");
+  };
+  show();
+}
+$("newBtn").onclick = () => openOrder(null);
+
+async function saveOrder(){
+  const title = $("oTitle").value.trim(); if (!title){ $("oErr").textContent = "Give the order a title."; return; }
+  const rec = { title, occasion: $("oOcc").value || null, order_date: $("oDate").value || today(),
+    head_count: $("oHead").value === "" ? null : +$("oHead").value, status: $("oStatus").value, note: $("oNote").value.trim() || null };
+  $("oErr").textContent = "";
+  try {
+    let oid = editingId;
+    if (oid){ const r = await sb.from("cafe_orders").update(rec).eq("id", oid); if (r.error) throw r.error;
+      const d = await sb.from("cafe_order_lines").delete().eq("order_id", oid); if (d.error) throw d.error; }
+    else { const r = await sb.from("cafe_orders").insert({ ...rec, created_by: ctx.me.id }).select("id").single(); if (r.error) throw r.error; oid = r.data.id; }
+    const ls = [...document.querySelectorAll("#lineList .nomrow")].map(d => {
+      const it = items.find(i => i.id === d.querySelector("[data-f=item]").value);
+      return { order_id: oid, item_id: it?.id || null, item_name: it?.name || "", vendor: it?.vendor || null, price: it?.price || 0, qty: +d.querySelector("[data-f=qty]").value || 0 };
+    }).filter(l => l.item_name && l.qty > 0);
+    if (ls.length){ const r = await sb.from("cafe_order_lines").insert(ls); if (r.error) throw r.error; }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  } catch (e){ $("oErr").textContent = "Could not save: " + e.message; }
+}
+
+function orderPdf(o){
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: "mm", format: "a4" });
+  const G = [29, 92, 58], W = doc.internal.pageSize.getWidth();
+  const ls = lines.filter(l => l.order_id === o.id);
+  doc.setFillColor(...G); doc.rect(0, 0, W, 24, "F");
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.text("Green Hedge Capital", 14, 11);
+  doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text("Café — order for approval", 14, 18);
+  doc.setTextColor(27, 31, 28); doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.text(o.title, 14, 34);
+  doc.setFontSize(10); doc.setFont("helvetica", "normal");
+  doc.text([`Occasion: ${o.occasion || "—"}`, `Date: ${fmtY(o.order_date)}`,
+            `Head count: ${o.head_count ?? "—"}`, `Prepared by: ${ctx.profile.full_name}`], 14, 42);
+  doc.autoTable({ startY: 62, head: [["Item", "Vendor", "Qty", "Price", "Amount"]],
+    body: ls.map(l => [l.item_name, l.vendor || "", l.qty, inr(l.price), inr(l.amount)]),
+    foot: [["", "", "", "Total", inr(o.total)]],
+    theme: "grid", styles: { fontSize: 9.5, cellPadding: 2.4 }, headStyles: { fillColor: G, textColor: 255 },
+    footStyles: { fillColor: [240, 242, 239], textColor: 27, fontStyle: "bold" }, margin: { left: 14, right: 14 } });
+  let y = doc.lastAutoTable.finalY + 10;
+  if (o.head_count) { doc.setFontSize(10); doc.text(`Approximately ${inr(Math.round((+o.total||0) / o.head_count))} per head`, 14, y); y += 8; }
+  if (o.note){ doc.setFontSize(10); doc.text(doc.splitTextToSize("Note: " + o.note, W - 28), 14, y); y += 14; }
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text("Approved by ______________________        Date ____________", 14, Math.max(y + 10, 240));
+  doc.text(`Generated ${new Date().toLocaleString("en-IN")} · GHC Hub`, 14, 285);
+  doc.save(`Cafe_order_${o.title.replace(/[^A-Za-z0-9]/g, "_")}_${o.order_date || today()}.pdf`);
+}
+
+function wireAdds(){
+  document.querySelectorAll("[data-add]").forEach(b => b.onclick = async e => { e.preventDefault();
+    if (!isAdm()){ toast("Only an admin can add to this list"); return; }
+    const key = b.dataset.add, v = prompt("Add an option:"); if (!v) return;
+    const r = await sb.from("lookup_values").insert({ module: MOD, list_key: key, value: v.trim(), sort: lookups.filter(l => l.list_key === key).length }).select().single();
+    if (r.error){ alert(r.error.message); return; }
+    lookups.push(r.data);
+    const sel = b.closest("div").querySelector("select");
+    const o = document.createElement("option"); o.textContent = v.trim(); sel.appendChild(o); sel.value = v.trim(); toast("Added ✓"); });
+}
+function show(){ $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0; }
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+
+/* lists + extra fields */
+const LIST_LABELS = { vendor: "Vendor", category: "Category", occasion: "Occasion" };
+async function drawList(){ if (!Object.keys(usage).length) usage = await lmLoadUsage(MOD);
+  lmRender({ mod: MOD, listSel: $("listSel"), itemsEl: $("listItems"), labels: LIST_LABELS, lookups, usage, onChange: () => render() }); }
+$("listBtn").onclick = () => { $("listSel").innerHTML = Object.keys(LIST_LABELS).map(k => `<option value="${k}">${esc(LIST_LABELS[k])}</option>`).join(""); drawList(); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listSel").onchange = () => drawList();
+$("listAdd").onclick = async () => { const k = $("listSel").value, v = $("listNew").value.trim(); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: MOD, list_key: k, value: v, sort: lookups.filter(l => l.list_key === k).length }).select().single();
+  if (r.error){ toast(r.error.message); return; } lookups.push(r.data); $("listNew").value = ""; usage = {}; await drawList(); toast("Added ✓"); };
+$("cfBtn").onclick = () => { fieldMgr(MOD); $("cfModal").classList.remove("hidden"); };
+$("cfClose").onclick = () => $("cfModal").classList.add("hidden");
+$("cfAdd").onclick = () => addCustomField(MOD);
+$("xlsBtn").onclick = () => {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orders.map(o => ({ Order: o.title, Occasion: o.occasion || "", Date: o.order_date || "", "Head count": o.head_count ?? "", Status: o.status, Total: o.total }))), "Orders");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(lines.map(l => { const o = orders.find(x => x.id === l.order_id) || {}; return { Order: o.title || "", Item: l.item_name, Vendor: l.vendor || "", Qty: l.qty, Price: l.price, Amount: l.amount }; })), "Lines");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(items.map(i => ({ Item: i.name, Vendor: i.vendor || "", Category: i.category || "", Price: i.price, Unit: i.unit || "", Available: i.active ? "yes" : "no" }))), "Menu");
+  XLSX.writeFile(wb, `GHC_cafe_${today()}.xlsx`);
+};
+</script>
+</body>
+</html>

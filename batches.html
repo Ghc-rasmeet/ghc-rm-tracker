@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Batch Tracking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="band">
+      <div class="grp"><div class="rvhead">Batches</div><div class="stats" id="stats"></div></div>
+      <div class="grp"><div class="rvhead">Students</div><div class="stats" id="sstats"></div></div>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="on" data-t="batches">Batches</button>
+      <button data-t="students">All students</button>
+    </div>
+
+    <div id="tab-batches">
+      <div class="controls">
+        <input id="q" class="grow" placeholder="Search batch, instructor, coordinator, WhatsApp group">
+        <select id="fCourse" style="width:auto"><option value="">All courses</option></select>
+        <select id="fStatus" style="width:auto"><option value="">All statuses</option><option>upcoming</option><option>running</option><option>completed</option><option>cancelled</option></select>
+        <button class="btn small" id="newBtn">+ New batch</button>
+        <button class="btn ghost small hidden" id="listBtn">Lists</button>
+        <button class="btn ghost small hidden" id="cfBtn">Extra fields</button>
+        <button class="btn ghost small hidden" id="xlsBtn">Export</button>
+      </div>
+      <div class="tablewrap"><table><thead><tr>
+        <th class="sort" data-k="name">Batch</th><th class="sort" data-k="course">Course</th>
+        <th class="sort" data-k="instructor">Instructor</th><th>Coordinator</th>
+        <th>WhatsApp group</th><th class="sort" data-k="start_date">Starts</th>
+        <th>Students</th><th class="side">Status</th>
+      </tr></thead><tbody id="rows"></tbody></table>
+      <div class="empty hidden" id="empty">No batches yet.</div></div>
+    </div>
+
+    <div id="tab-students" class="hidden">
+      <div class="controls">
+        <input id="sq" class="grow" placeholder="Search student name or phone">
+        <select id="sBatch" style="width:auto"><option value="">All batches</option></select>
+      </div>
+      <div class="tablewrap"><table><thead><tr><th>Student</th><th>Phone</th><th>Batch</th><th>Course</th><th>Joined</th><th class="side">Status</th></tr></thead><tbody id="srows"></tbody></table>
+      <div class="empty hidden" id="sempty">No students yet.</div></div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle"></h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+
+<div id="listModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:600px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Dropdown lists</h2>
+      <select id="listSel" style="width:auto"></select><button class="x" id="listClose">×</button></div>
+    <ul id="listItems" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="listNew" placeholder="Add a new option"><button class="btn small" id="listAdd">Add</button></div>
+  </div>
+</div>
+
+<div id="cfModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:520px">
+    <div style="display:flex;align-items:center"><h2 style="margin:0">Extra fields</h2><button class="x" id="cfClose">×</button></div>
+    <p class="fml" style="margin:8px 0">Your own fields on a batch.</p>
+    <ul id="cfList" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div class="grid2"><div><label>Field name</label><input id="cfLabel" placeholder="e.g. Classroom"></div>
+      <div><label>Type</label><select id="cfType"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="yesno">Yes / No</option></select></div></div>
+    <button class="btn" id="cfAdd" style="margin-top:8px">Add field</button>
+  </div>
+</div>
+
+<script>
+const MOD = "batch";
+let ctx, batches = [], students = [], feeStudents = [], editingId = null, tab = "batches";
+let filter = { q: "", course: "", status: "", sq: "", sbatch: "", sort: "start_date", dir: -1 };
+/* ---- shared helpers for module pages ---- */
+let lookups = [], customFields = [], usage = {};
+const opts = key => lookups.filter(l => l.list_key === key && l.active).sort((a,b) => a.sort - b.sort).map(l => l.value);
+const isAdm = () => ctx.isSuper || ctx.level === "admin";
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+async function loadShared(mod){
+  try { lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === mod); } catch (e){ lookups = []; }
+  try { customFields = (await fetchAll("module_fields","module, field_key, label, ftype, grp, sort, is_custom")).filter(f => f.module === mod && f.is_custom).sort((a,b) => a.sort - b.sort); } catch (e){ customFields = []; }
+}
+function customInputs(rec){
+  if (!customFields.length) return "";
+  return `<h3 style="margin-top:16px">More details</h3><div class="grid2">` + customFields.map(f => {
+    const v = (rec && rec.extra && rec.extra[f.field_key]) ?? "";
+    let input;
+    if (f.ftype.startsWith("list:")) input = `<select id="x_${f.field_key}"><option value=""></option>` + opts(f.ftype.slice(5)).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+    else if (f.ftype === "yesno") input = `<select id="x_${f.field_key}"><option value=""></option><option ${v === "Yes" ? "selected" : ""}>Yes</option><option ${v === "No" ? "selected" : ""}>No</option></select>`;
+    else input = `<input id="x_${f.field_key}" type="${f.ftype === "date" ? "date" : f.ftype === "number" ? "number" : "text"}" value="${esc(v)}">`;
+    return `<div><label>${esc(f.label)}</label>${input}</div>`;
+  }).join("") + `</div>`;
+}
+function customValues(){
+  const o = {};
+  customFields.forEach(f => { const el = $("x_" + f.field_key); if (el && el.value !== "") o[f.field_key] = el.value; });
+  return o;
+}
+/* custom field manager */
+function fieldMgr(mod){
+  $("cfList").innerHTML = customFields.map(f => `<li><span>${esc(f.label)} <span style="color:var(--muted);font-size:12px">· ${esc(f.ftype)}</span></span>
+    <a href="#" data-cfdel="${f.field_key}" style="color:var(--warn)">Remove</a></li>`).join("") || `<li style="color:var(--muted)">No extra fields yet.</li>`;
+  document.querySelectorAll("[data-cfdel]").forEach(a => a.onclick = async e => { e.preventDefault();
+    if (!confirm("Remove this field? Values already entered stay in the record but stop being shown.")) return;
+    const r = await sb.from("module_fields").delete().eq("module", mod).eq("field_key", a.dataset.cfdel);
+    if (r.error){ alert(r.error.message); return; }
+    customFields = customFields.filter(f => f.field_key !== a.dataset.cfdel); fieldMgr(mod); toast("Removed"); });
+}
+async function addCustomField(mod){
+  const label = $("cfLabel").value.trim(); if (!label){ toast("Give the field a name"); return; }
+  const key = "x_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const r = await sb.from("module_fields").insert({ module: mod, field_key: key, label, ftype: $("cfType").value, grp: "More details", sort: 900 + customFields.length, is_custom: true }).select().single();
+  if (r.error){ alert(r.error.message); return; }
+  customFields.push(r.data); $("cfLabel").value = ""; fieldMgr(mod); toast("Field added ✓");
+}
+
+/* ===== shared list manager (v6.4) ===== */
+async function lmLoadUsage(mod){
+  try { const { data, error } = await sb.rpc("lookup_usage", { m: mod }); if (error) throw error;
+    const u = {}; (data || []).forEach(r => u[r.list_key + "||" + r.value] = +r.uses); return u; } catch (e){ return {}; }
+}
+function lmNorm(s){ return (s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function lmRender(cfg){
+  const { mod, listSel, itemsEl, labels, lookups, usage, onChange } = cfg;
+  const k = listSel.value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  const dupe = {}; items.forEach(i => { const n = lmNorm(i.value); (dupe[n] ||= []).push(i.value); });
+  itemsEl.innerHTML = items.map(i => {
+    const n = usage[k + "||" + i.value] || 0;
+    const isDupe = dupe[lmNorm(i.value)].length > 1;
+    const count = n ? `<span class="pill ${isDupe ? "hot" : "talk"}">${n} record${n === 1 ? "" : "s"}${isDupe ? " · looks duplicate" : ""}</span>`
+                    : `<span style="color:var(--muted);font-size:12px">not used${isDupe ? " · looks duplicate" : ""}</span>`;
+    return `<li style="align-items:center;gap:10px">
+      <span style="flex:1">${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span>
+      ${count}
+      ${isDupe ? `<button class="btn ghost small" data-merge="${esc(i.value)}">Merge</button>` : ""}
+      <button class="btn ghost small" data-toggle="${i.id}">${i.active ? "Turn off" : "Turn on"}</button>
+      <button class="btn ghost small" data-del="${esc(i.value)}" ${n ? `disabled title="Used by ${n} record${n === 1 ? "" : "s"} — merge it first" style="opacity:.45"` : 'style="color:var(--warn);border-color:var(--warn)"'}>Delete</button>
+    </li>`;
+  }).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+
+  itemsEl.querySelectorAll("[data-toggle]").forEach(b => b.onclick = async () => {
+    const it = lookups.find(l => String(l.id) === b.dataset.toggle);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; lmRender(cfg); onChange && onChange();
+  });
+  itemsEl.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const v = b.dataset.del;
+    if (!confirm(`Delete "${v}" from this list? It cannot be undone.`)) return;
+    const { error } = await sb.rpc("lookup_delete", { m: mod, lk: k, v });
+    if (error){ alert(error.message); return; }
+    const i = lookups.findIndex(l => l.list_key === k && l.value === v); if (i >= 0) lookups.splice(i, 1);
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange(); toast("Deleted ✓");
+  });
+  itemsEl.querySelectorAll("[data-merge]").forEach(b => b.onclick = async () => {
+    const from = b.dataset.merge;
+    const others = dupe[lmNorm(from)].filter(v => v !== from);
+    const to = prompt(`Move every record from "${from}" into which option?\n\n${others.join("\n")}`, others[0]);
+    if (!to) return;
+    const { data, error } = await sb.rpc("lookup_merge", { m: mod, lk: k, from_value: from, to_value: to });
+    if (error){ alert(error.message); return; }
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange();
+    toast(`${data || 0} record${data === 1 ? "" : "s"} moved to "${to}" — you can delete the old one now`, 4000);
+  });
+}
+
+
+(async () => {
+  ctx = await requireAuth(MOD); if (!ctx) return;
+  shellHeader("Batch Tracking", ctx);
+  await loadShared(MOD); await load();
+  $("app").classList.remove("hidden");
+  if (!canEdit()) $("newBtn").classList.add("hidden");
+  if (isAdm()) ["listBtn","cfBtn","xlsBtn"].forEach(i => $(i).classList.remove("hidden"));
+  render();
+})();
+
+async function load(){
+  batches = await fetchAll("batches", "*", { col: "start_date", asc: false });
+  students = await fetchAll("batch_students", "*");
+  try { feeStudents = await fetchAll("fee_view", "id, student_name, phone_no, main_course"); } catch (e){ feeStudents = []; }
+  $("fCourse").innerHTML = `<option value="">All courses</option>` + opts("course").map(o => `<option>${esc(o)}</option>`).join("");
+  $("sBatch").innerHTML = `<option value="">All batches</option>` + batches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join("");
+}
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  tab = b.dataset.t; $("tab-batches").classList.toggle("hidden", tab !== "batches"); $("tab-students").classList.toggle("hidden", tab !== "students");
+});
+
+const countOf = id => students.filter(s => s.batch_id === id && s.status === "active").length;
+
+function render(){
+  const tile = (l, v, cls = "") => `<div class="stat ${cls}"><b>${v}</b><span>${l}</span></div>`;
+  const running = batches.filter(b => b.status === "running");
+  $("stats").innerHTML = tile("All batches", batches.length) + tile("Running", running.length, "grn") +
+    tile("Upcoming", batches.filter(b => b.status === "upcoming").length, "amb") +
+    tile("Completed", batches.filter(b => b.status === "completed").length);
+  const active = students.filter(s => s.status === "active");
+  $("sstats").innerHTML = tile("Students now", active.length, "pct") +
+    tile("In running batches", active.filter(s => running.some(b => b.id === s.batch_id)).length) +
+    tile("Average per batch", running.length ? Math.round(active.filter(s => running.some(b => b.id === s.batch_id)).length / running.length) : 0) +
+    tile("Left", students.filter(s => s.status === "left").length, "red");
+
+  let list = batches.slice();
+  if (filter.course) list = list.filter(b => b.course === filter.course);
+  if (filter.status) list = list.filter(b => b.status === filter.status);
+  const q = filter.q.toLowerCase();
+  if (q) list = list.filter(b => [b.name, b.instructor, b.coordinator, b.whatsapp_group].some(v => (v || "").toLowerCase().includes(q)));
+  list.sort((a,b) => { const x = a[filter.sort] ?? "", y = b[filter.sort] ?? ""; return x < y ? -filter.dir : x > y ? filter.dir : 0; });
+  $("rows").innerHTML = list.map(b => {
+    const col = { running: "done", upcoming: "hot", completed: "talk", cancelled: "cold" }[b.status] || "talk";
+    return `<tr class="row" data-id="${b.id}"><td>${esc(b.name)}</td><td>${esc(b.course || "")}</td>
+      <td>${esc(b.instructor || "")}</td><td>${esc(b.coordinator || "")}</td><td>${esc(b.whatsapp_group || "")}</td>
+      <td>${fmtY(b.start_date)}</td><td><b>${countOf(b.id)}</b></td><td class="side"><span class="pill ${col}">${esc(b.status)}</span></td></tr>`; }).join("");
+  $("empty").classList.toggle("hidden", list.length > 0);
+  document.querySelectorAll("#rows tr.row").forEach(el => el.onclick = () => openBatch(el.dataset.id));
+  document.querySelectorAll("th.sort").forEach(th => th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); });
+
+  const bmap = Object.fromEntries(batches.map(b => [b.id, b]));
+  let sl = students.slice();
+  if (filter.sbatch) sl = sl.filter(s => s.batch_id === filter.sbatch);
+  const sq = filter.sq.toLowerCase();
+  if (sq) sl = sl.filter(s => [s.student_name, s.phone].some(v => (v || "").toLowerCase().includes(sq)));
+  sl.sort((a,b) => (a.student_name || "").localeCompare(b.student_name || ""));
+  $("srows").innerHTML = sl.map(s => { const b = bmap[s.batch_id] || {};
+    return `<tr class="row" data-b="${s.batch_id}" style="cursor:pointer"><td>${esc(s.student_name)}</td><td>${esc(s.phone || "")}</td>
+      <td>${esc(b.name || "")}</td><td>${esc(b.course || "")}</td><td>${fmtY(s.joined_on)}</td>
+      <td class="side"><span class="pill ${s.status === "active" ? "done" : s.status === "left" ? "cold" : "talk"}">${esc(s.status)}</span></td></tr>`; }).join("");
+  $("sempty").classList.toggle("hidden", sl.length > 0);
+  document.querySelectorAll("#srows tr.row").forEach(el => el.onclick = () => openBatch(el.dataset.b));
+}
+$("q").oninput = e => { filter.q = e.target.value; render(); };
+$("fCourse").onchange = e => { filter.course = e.target.value; render(); };
+$("fStatus").onchange = e => { filter.status = e.target.value; render(); };
+$("sq").oninput = e => { filter.sq = e.target.value; render(); };
+$("sBatch").onchange = e => { filter.sbatch = e.target.value; render(); };
+
+/* ---------- batch drawer ---------- */
+function studentRows(ss){
+  return ss.map(s => `<div class="nomrow" data-sid="${s.id || ""}" style="grid-template-columns:1.6fr 1fr 1fr 30px">
+    <input data-f="name" placeholder="Student name" value="${esc(s.student_name || "")}" list="feeList">
+    <input data-f="phone" placeholder="Phone" value="${esc(s.phone || "")}">
+    <select data-f="status">${["active","left","completed"].map(x => `<option ${s.status === x ? "selected" : ""}>${x}</option>`).join("")}</select>
+    <button title="remove">×</button></div>`).join("");
+}
+function wireStudents(){
+  document.querySelectorAll("#stuList .nomrow").forEach(d => {
+    d.querySelector("button").onclick = () => { d.remove(); };
+    const nameEl = d.querySelector("[data-f=name]");
+    nameEl.onchange = () => { const f = feeStudents.find(x => x.student_name === nameEl.value);
+      if (f && !d.querySelector("[data-f=phone]").value) d.querySelector("[data-f=phone]").value = f.phone_no || ""; };
+  });
+}
+function openBatch(id){
+  const b = id ? batches.find(x => x.id === id) : null; editingId = id || null;
+  const ss = b ? students.filter(s => s.batch_id === b.id) : [];
+  const ro = !canEdit();
+  $("dTitle").textContent = b ? b.name : "New batch";
+  $("dMeta").textContent = b ? `${b.course || ""} · ${countOf(b.id)} students` : "";
+  $("dbody").innerHTML = `<div class="grid2">
+    <div style="grid-column:1/-1"><label>Batch name</label><input id="bName" value="${esc(b?.name || "")}" placeholder="e.g. Green Batch 14" ${ro ? "disabled" : ""}></div>
+    <div><label>Course <button class="btn ghost small" data-add="course" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="bCourse" ${ro ? "disabled" : ""}><option value=""></option>${opts("course").map(o => `<option ${b?.course === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Status</label><select id="bStatus" ${ro ? "disabled" : ""}>${["upcoming","running","completed","cancelled"].map(x => `<option ${b?.status === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+    <div><label>Instructor <button class="btn ghost small" data-add="instructor" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="bInstructor" ${ro ? "disabled" : ""}><option value=""></option>${opts("instructor").map(o => `<option ${b?.instructor === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Coordinator <button class="btn ghost small" data-add="coordinator" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="bCoord" ${ro ? "disabled" : ""}><option value=""></option>${opts("coordinator").map(o => `<option ${b?.coordinator === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Starts</label><input id="bStart" type="date" value="${b?.start_date || ""}" ${ro ? "disabled" : ""}></div>
+    <div><label>Ends</label><input id="bEnd" type="date" value="${b?.end_date || ""}" ${ro ? "disabled" : ""}></div>
+    <div style="grid-column:1/-1"><label>WhatsApp group</label><input id="bWa" value="${esc(b?.whatsapp_group || "")}" placeholder="group name" ${ro ? "disabled" : ""}></div>
+  </div>
+  <label>Note</label><textarea id="bNote" rows="2" ${ro ? "disabled" : ""}>${esc(b?.note || "")}</textarea>
+  ${customInputs(b)}
+  <h3 style="margin-top:18px">Students <button class="btn ghost small" id="addStu" ${ro ? "disabled" : ""} style="margin-left:8px">+ Add student</button></h3>
+  <datalist id="feeList">${feeStudents.map(f => `<option value="${esc(f.student_name)}">`).join("")}</datalist>
+  <div id="stuList">${studentRows(ss)}</div>
+  <div class="err" id="bErr"></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+    ${ro ? "" : `<button class="btn" id="bSave">Save</button>`}
+    ${b && canEdit() ? `<button class="btn ghost" id="bDel" style="color:var(--warn);border-color:var(--warn)">Delete batch</button>` : ""}</div>`;
+  wireAdds(); wireStudents();
+  $("addStu").onclick = () => { $("stuList").insertAdjacentHTML("beforeend", studentRows([{ status: "active" }])); wireStudents(); };
+  if ($("bSave")) $("bSave").onclick = saveBatch;
+  if ($("bDel")) $("bDel").onclick = async () => {
+    if (!confirm("Delete this batch and its student list?")) return;
+    const r = await sb.from("batches").delete().eq("id", editingId);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); closeDrawer(); render(); toast("Deleted");
+  };
+  show();
+}
+$("newBtn").onclick = () => openBatch(null);
+
+async function saveBatch(){
+  const name = $("bName").value.trim(); if (!name){ $("bErr").textContent = "Give the batch a name."; return; }
+  const rec = { name, course: $("bCourse").value || null, status: $("bStatus").value,
+    instructor: $("bInstructor").value || null, coordinator: $("bCoord").value || null,
+    start_date: $("bStart").value || null, end_date: $("bEnd").value || null,
+    whatsapp_group: $("bWa").value.trim() || null, note: $("bNote").value.trim() || null, extra: customValues() };
+  $("bErr").textContent = "";
+  try {
+    let bid = editingId;
+    if (bid){ const r = await sb.from("batches").update(rec).eq("id", bid); if (r.error) throw r.error;
+      const d = await sb.from("batch_students").delete().eq("batch_id", bid); if (d.error) throw d.error; }
+    else { const r = await sb.from("batches").insert({ ...rec, created_by: ctx.me.id }).select("id").single(); if (r.error) throw r.error; bid = r.data.id; }
+    const ss = [...document.querySelectorAll("#stuList .nomrow")].map(d => {
+      const f = feeStudents.find(x => x.student_name === d.querySelector("[data-f=name]").value.trim());
+      return { batch_id: bid, student_name: d.querySelector("[data-f=name]").value.trim(),
+        phone: d.querySelector("[data-f=phone]").value.trim() || null, status: d.querySelector("[data-f=status]").value,
+        fee_student_id: f ? f.id : null, joined_on: today() };
+    }).filter(s => s.student_name);
+    if (ss.length){ const r = await sb.from("batch_students").insert(ss); if (r.error) throw r.error; }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  } catch (e){ $("bErr").textContent = "Could not save: " + e.message; }
+}
+
+function wireAdds(){
+  document.querySelectorAll("[data-add]").forEach(b => b.onclick = async e => { e.preventDefault();
+    if (!isAdm()){ toast("Only an admin can add to this list"); return; }
+    const key = b.dataset.add, v = prompt("Add an option:"); if (!v) return;
+    const r = await sb.from("lookup_values").insert({ module: MOD, list_key: key, value: v.trim(), sort: lookups.filter(l => l.list_key === key).length }).select().single();
+    if (r.error){ alert(r.error.message); return; }
+    lookups.push(r.data);
+    const sel = b.closest("div").querySelector("select");
+    const o = document.createElement("option"); o.textContent = v.trim(); sel.appendChild(o); sel.value = v.trim(); toast("Added ✓"); });
+}
+function show(){ $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0; }
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+
+const LIST_LABELS = { course: "Course", instructor: "Instructor", coordinator: "Coordinator" };
+async function drawList(){ if (!Object.keys(usage).length) usage = await lmLoadUsage(MOD);
+  lmRender({ mod: MOD, listSel: $("listSel"), itemsEl: $("listItems"), labels: LIST_LABELS, lookups, usage, onChange: () => render() }); }
+$("listBtn").onclick = () => { $("listSel").innerHTML = Object.keys(LIST_LABELS).map(k => `<option value="${k}">${esc(LIST_LABELS[k])}</option>`).join(""); drawList(); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listSel").onchange = () => drawList();
+$("listAdd").onclick = async () => { const k = $("listSel").value, v = $("listNew").value.trim(); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: MOD, list_key: k, value: v, sort: lookups.filter(l => l.list_key === k).length }).select().single();
+  if (r.error){ toast(r.error.message); return; } lookups.push(r.data); $("listNew").value = ""; usage = {}; await drawList(); toast("Added ✓"); };
+$("cfBtn").onclick = () => { fieldMgr(MOD); $("cfModal").classList.remove("hidden"); };
+$("cfClose").onclick = () => $("cfModal").classList.add("hidden");
+$("cfAdd").onclick = () => addCustomField(MOD);
+$("xlsBtn").onclick = () => {
+  const bmap = Object.fromEntries(batches.map(b => [b.id, b]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(batches.map(b => ({ Batch: b.name, Course: b.course || "", Instructor: b.instructor || "", Coordinator: b.coordinator || "", "WhatsApp group": b.whatsapp_group || "", Starts: b.start_date || "", Ends: b.end_date || "", Status: b.status, Students: countOf(b.id) }))), "Batches");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(students.map(s => { const b = bmap[s.batch_id] || {}; return { Student: s.student_name, Phone: s.phone || "", Batch: b.name || "", Course: b.course || "", Coordinator: b.coordinator || "", Joined: s.joined_on || "", Status: s.status }; })), "Students");
+  XLSX.writeFile(wb, `GHC_batches_${today()}.xlsx`);
+};
+</script>
+</body>
+</html>

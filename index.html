@@ -77,6 +77,9 @@ const MODULES = [
   { key: "subs",      name: "Subscriptions",         desc: "Renewals, spend, logins, cancellations",               href: "subscriptions.html" },
   { key: "supp_cde",  name: "Client Data Entry",     desc: "Supplementary · new client records, Zoho hand-off",    href: "client-data.html" },
   { key: "supp_fee",  name: "Student Fee Tracking",  desc: "Supplementary · GHC Academy fees, instalments, clearance", href: "fee-tracker.html" },
+  { key: "cafe",      name: "Café",                  desc: "Food items, sample orders, approval PDF",               href: "cafe.html" },
+  { key: "inv",       name: "Inventory",             desc: "Stock, issues free and paid, dues, monthly closing",    href: "inventory.html" },
+  { key: "batch",     name: "Batch Tracking",        desc: "Batches, students, instructors, WhatsApp groups",       href: "batches.html" },
 ];
 let ctx = null, userModules = [];
 const myLevel = k => ctx.isSuper ? "admin" : (ctx.access[k] || "");
@@ -190,11 +193,11 @@ $("nuAdd").onclick = async () => {
   $("nuAdd").disabled = false;
 };
 /* ================= BACKUP / RESTORE ================= */
-const TABLES = ["modules","profiles","user_modules","module_fields","field_perms","module_features","feature_perms","cde_clients","cde_log","lookup_values","fee_students","fee_log","clients","touches","touch_log","reviews","review_log","upload_log",
+const TABLES = ["modules","profiles","user_modules","module_fields","field_perms","module_features","feature_perms","cde_clients","cde_log","lookup_values","fee_students","fee_log","cafe_items","cafe_orders","cafe_order_lines","inv_items","inv_moves","inv_payments","batches","batch_students","clients","touches","touch_log","reviews","review_log","upload_log",
   "ins_types","ins_clients","policies","policy_members","policy_nominees","policy_files","subs","subs_log"];
-const RESTORE_ORDER = ["modules","user_modules","module_fields","field_perms","module_features","feature_perms","lookup_values","cde_clients","fee_students","clients","touches","touch_log","reviews","review_log","upload_log",
+const RESTORE_ORDER = ["modules","user_modules","module_fields","field_perms","module_features","feature_perms","lookup_values","cde_clients","fee_students","cafe_items","cafe_orders","cafe_order_lines","inv_items","inv_moves","inv_payments","batches","batch_students","clients","touches","touch_log","reviews","review_log","upload_log",
   "ins_types","ins_clients","policies","policy_members","policy_nominees","policy_files","subs","subs_log"];
-const APP_FILES = ["index.html","touch.html","insurance.html","subscriptions.html","client-data.html","fee-tracker.html","common.js","style.css","schema.sql","admin-users.ts","README.md"];
+const APP_FILES = ["index.html","touch.html","insurance.html","subscriptions.html","client-data.html","fee-tracker.html","cafe.html","inventory.html","batches.html","common.js","style.css","schema.sql","admin-users.ts","README.md"];
 
 function busy(on, txt){ let b = $("busy");
   if (!b){ b = document.createElement("div"); b.id = "busy"; b.innerHTML = '<div class="sp"></div><div id="busyTxt"></div><div style="font-size:13px;color:var(--muted)">Please keep this tab open</div>'; document.body.appendChild(b); }

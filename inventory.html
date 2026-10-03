@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Inventory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="tabs" id="tabs">
+      <button class="on" data-t="stock">Stock</button>
+      <button data-t="moves">Issues &amp; purchases</button>
+      <button data-t="dues">Dues</button>
+    </div>
+
+    <div class="band">
+      <div class="grp"><div class="rvhead">Stock</div><div class="stats" id="stats"></div></div>
+      <div class="grp"><div class="rvhead">Money</div><div class="stats" id="money"></div>
+        <div class="fml">Balance = opening + purchases − given free − given paid ± adjustments</div></div>
+    </div>
+
+    <div id="tab-stock">
+      <div class="controls">
+        <input id="q" class="grow" placeholder="Search item or code">
+        <select id="fCat" style="width:auto"><option value="">All categories</option></select>
+        <button class="btn small" id="issueBtn">+ Issue / receive</button>
+        <button class="btn ghost small hidden" id="newItemBtn">+ New item</button>
+        <button class="btn ghost small hidden" id="listBtn">Lists</button>
+        <button class="btn ghost small hidden" id="cfBtn">Extra fields</button>
+        <button class="btn ghost small hidden" id="repBtn">Monthly closing</button>
+        <button class="btn ghost small hidden" id="xlsBtn">Export</button>
+      </div>
+      <div class="tablewrap"><table><thead><tr>
+        <th class="sort" data-k="code">Code</th><th class="sort" data-k="name">Item</th><th>Category</th>
+        <th class="sort" data-k="opening_qty">Opening</th><th>Given free</th><th>Given paid</th>
+        <th class="sort" data-k="balance">Balance</th><th>Rate</th><th class="side">Value</th>
+      </tr></thead><tbody id="rows"></tbody></table>
+      <div class="empty hidden" id="empty">No items yet.</div></div>
+    </div>
+
+    <div id="tab-moves" class="hidden">
+      <div class="controls">
+        <input id="mq" class="grow" placeholder="Search person, item or note">
+        <select id="mType" style="width:auto"><option value="">All kinds</option><option>purchase</option><option>free</option><option>paid</option><option>return</option><option>adjust</option></select>
+      </div>
+      <div class="tablewrap"><table><thead><tr><th>Date</th><th>Item</th><th>Kind</th><th>Qty</th><th>Person</th><th>Amount</th><th class="side">Recorded by</th></tr></thead><tbody id="mrows"></tbody></table></div>
+    </div>
+
+    <div id="tab-dues" class="hidden">
+      <div class="controls">
+        <input id="dq" class="grow" placeholder="Search person">
+        <button class="btn small hidden" id="payBtn">+ Record a payment</button>
+      </div>
+      <div class="tablewrap"><table><thead><tr><th>Person</th><th>Type</th><th>Billed</th><th>Paid</th><th class="side">Outstanding</th></tr></thead><tbody id="drows"></tbody></table>
+      <div class="empty hidden" id="dempty">Nothing outstanding.</div></div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle"></h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+
+<div id="listModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:600px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Dropdown lists</h2>
+      <select id="listSel" style="width:auto"></select><button class="x" id="listClose">×</button></div>
+    <ul id="listItems" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="listNew" placeholder="Add a new option"><button class="btn small" id="listAdd">Add</button></div>
+  </div>
+</div>
+
+<div id="cfModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:520px">
+    <div style="display:flex;align-items:center"><h2 style="margin:0">Extra fields</h2><button class="x" id="cfClose">×</button></div>
+    <p class="fml" style="margin:8px 0">Your own fields on an item — they appear at the bottom of the item form.</p>
+    <ul id="cfList" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div class="grid2"><div><label>Field name</label><input id="cfLabel" placeholder="e.g. Supplier code"></div>
+      <div><label>Type</label><select id="cfType"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="yesno">Yes / No</option></select></div></div>
+    <button class="btn" id="cfAdd" style="margin-top:8px">Add field</button>
+  </div>
+</div>
+
+<div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:860px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Monthly closing</h2>
+      <input type="month" id="repMonth" style="width:auto"><button class="btn small" id="repRun">Run</button>
+      <button class="btn ghost small" id="repXls">Export</button><button class="x" id="repClose">×</button></div>
+    <div class="fml" style="margin:8px 0">Closing stock and value at the end of the chosen month</div>
+    <div class="tablewrap"><table id="repTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<script>
+const MOD = "inv";
+let ctx, stock = [], itemsRaw = [], moves = [], dues = [], payments = [], editingId = null, tab = "stock";
+let filter = { q: "", cat: "", mq: "", mtype: "", dq: "", sort: "name", dir: 1 };
+/* ---- shared helpers for module pages ---- */
+let lookups = [], customFields = [], usage = {};
+const opts = key => lookups.filter(l => l.list_key === key && l.active).sort((a,b) => a.sort - b.sort).map(l => l.value);
+const isAdm = () => ctx.isSuper || ctx.level === "admin";
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+async function loadShared(mod){
+  try { lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === mod); } catch (e){ lookups = []; }
+  try { customFields = (await fetchAll("module_fields","module, field_key, label, ftype, grp, sort, is_custom")).filter(f => f.module === mod && f.is_custom).sort((a,b) => a.sort - b.sort); } catch (e){ customFields = []; }
+}
+function customInputs(rec){
+  if (!customFields.length) return "";
+  return `<h3 style="margin-top:16px">More details</h3><div class="grid2">` + customFields.map(f => {
+    const v = (rec && rec.extra && rec.extra[f.field_key]) ?? "";
+    let input;
+    if (f.ftype.startsWith("list:")) input = `<select id="x_${f.field_key}"><option value=""></option>` + opts(f.ftype.slice(5)).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+    else if (f.ftype === "yesno") input = `<select id="x_${f.field_key}"><option value=""></option><option ${v === "Yes" ? "selected" : ""}>Yes</option><option ${v === "No" ? "selected" : ""}>No</option></select>`;
+    else input = `<input id="x_${f.field_key}" type="${f.ftype === "date" ? "date" : f.ftype === "number" ? "number" : "text"}" value="${esc(v)}">`;
+    return `<div><label>${esc(f.label)}</label>${input}</div>`;
+  }).join("") + `</div>`;
+}
+function customValues(){
+  const o = {};
+  customFields.forEach(f => { const el = $("x_" + f.field_key); if (el && el.value !== "") o[f.field_key] = el.value; });
+  return o;
+}
+/* custom field manager */
+function fieldMgr(mod){
+  $("cfList").innerHTML = customFields.map(f => `<li><span>${esc(f.label)} <span style="color:var(--muted);font-size:12px">· ${esc(f.ftype)}</span></span>
+    <a href="#" data-cfdel="${f.field_key}" style="color:var(--warn)">Remove</a></li>`).join("") || `<li style="color:var(--muted)">No extra fields yet.</li>`;
+  document.querySelectorAll("[data-cfdel]").forEach(a => a.onclick = async e => { e.preventDefault();
+    if (!confirm("Remove this field? Values already entered stay in the record but stop being shown.")) return;
+    const r = await sb.from("module_fields").delete().eq("module", mod).eq("field_key", a.dataset.cfdel);
+    if (r.error){ alert(r.error.message); return; }
+    customFields = customFields.filter(f => f.field_key !== a.dataset.cfdel); fieldMgr(mod); toast("Removed"); });
+}
+async function addCustomField(mod){
+  const label = $("cfLabel").value.trim(); if (!label){ toast("Give the field a name"); return; }
+  const key = "x_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const r = await sb.from("module_fields").insert({ module: mod, field_key: key, label, ftype: $("cfType").value, grp: "More details", sort: 900 + customFields.length, is_custom: true }).select().single();
+  if (r.error){ alert(r.error.message); return; }
+  customFields.push(r.data); $("cfLabel").value = ""; fieldMgr(mod); toast("Field added ✓");
+}
+
+/* ===== shared list manager (v6.4) ===== */
+async function lmLoadUsage(mod){
+  try { const { data, error } = await sb.rpc("lookup_usage", { m: mod }); if (error) throw error;
+    const u = {}; (data || []).forEach(r => u[r.list_key + "||" + r.value] = +r.uses); return u; } catch (e){ return {}; }
+}
+function lmNorm(s){ return (s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function lmRender(cfg){
+  const { mod, listSel, itemsEl, labels, lookups, usage, onChange } = cfg;
+  const k = listSel.value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  const dupe = {}; items.forEach(i => { const n = lmNorm(i.value); (dupe[n] ||= []).push(i.value); });
+  itemsEl.innerHTML = items.map(i => {
+    const n = usage[k + "||" + i.value] || 0;
+    const isDupe = dupe[lmNorm(i.value)].length > 1;
+    const count = n ? `<span class="pill ${isDupe ? "hot" : "talk"}">${n} record${n === 1 ? "" : "s"}${isDupe ? " · looks duplicate" : ""}</span>`
+                    : `<span style="color:var(--muted);font-size:12px">not used${isDupe ? " · looks duplicate" : ""}</span>`;
+    return `<li style="align-items:center;gap:10px">
+      <span style="flex:1">${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span>
+      ${count}
+      ${isDupe ? `<button class="btn ghost small" data-merge="${esc(i.value)}">Merge</button>` : ""}
+      <button class="btn ghost small" data-toggle="${i.id}">${i.active ? "Turn off" : "Turn on"}</button>
+      <button class="btn ghost small" data-del="${esc(i.value)}" ${n ? `disabled title="Used by ${n} record${n === 1 ? "" : "s"} — merge it first" style="opacity:.45"` : 'style="color:var(--warn);border-color:var(--warn)"'}>Delete</button>
+    </li>`;
+  }).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+
+  itemsEl.querySelectorAll("[data-toggle]").forEach(b => b.onclick = async () => {
+    const it = lookups.find(l => String(l.id) === b.dataset.toggle);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; lmRender(cfg); onChange && onChange();
+  });
+  itemsEl.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const v = b.dataset.del;
+    if (!confirm(`Delete "${v}" from this list? It cannot be undone.`)) return;
+    const { error } = await sb.rpc("lookup_delete", { m: mod, lk: k, v });
+    if (error){ alert(error.message); return; }
+    const i = lookups.findIndex(l => l.list_key === k && l.value === v); if (i >= 0) lookups.splice(i, 1);
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange(); toast("Deleted ✓");
+  });
+  itemsEl.querySelectorAll("[data-merge]").forEach(b => b.onclick = async () => {
+    const from = b.dataset.merge;
+    const others = dupe[lmNorm(from)].filter(v => v !== from);
+    const to = prompt(`Move every record from "${from}" into which option?\n\n${others.join("\n")}`, others[0]);
+    if (!to) return;
+    const { data, error } = await sb.rpc("lookup_merge", { m: mod, lk: k, from_value: from, to_value: to });
+    if (error){ alert(error.message); return; }
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange();
+    toast(`${data || 0} record${data === 1 ? "" : "s"} moved to "${to}" — you can delete the old one now`, 4000);
+  });
+}
+
+
+(async () => {
+  ctx = await requireAuth(MOD); if (!ctx) return;
+  shellHeader("Inventory", ctx);
+  await loadShared(MOD); await load();
+  $("app").classList.remove("hidden");
+  if (!canEdit()){ $("issueBtn").classList.add("hidden"); }
+  else { $("payBtn").classList.remove("hidden"); }
+  if (isAdm()) ["newItemBtn","listBtn","cfBtn","repBtn","xlsBtn"].forEach(i => $(i).classList.remove("hidden"));
+  render();
+})();
+
+function peopleList(){
+  const fromUsers = ctx.profiles.map(p => p.full_name);
+  const added = opts("person");
+  const used = moves.map(m => m.person).filter(Boolean);
+  return [...new Set([...fromUsers, ...added, ...used])].sort((a,b) => a.localeCompare(b));
+}
+async function load(){
+  itemsRaw = await fetchAll("inv_items", "*", { col: "name" });
+  stock = await fetchAll("inv_stock", "*", { col: "name" });
+  moves = await fetchAll("inv_moves", "*", { col: "move_date", asc: false });
+  payments = await fetchAll("inv_payments", "*", { col: "pay_date", asc: false });
+  try { dues = await fetchAll("inv_dues", "*"); } catch (e){ dues = []; }
+  $("fCat").innerHTML = `<option value="">All categories</option>` + opts("category").map(o => `<option>${esc(o)}</option>`).join("");
+}
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  tab = b.dataset.t; ["stock","moves","dues"].forEach(t => $("tab-" + t).classList.toggle("hidden", t !== tab));
+});
+
+function render(){
+  const tile = (l, v, cls = "") => `<div class="stat ${cls}"><b>${v}</b><span>${l}</span></div>`;
+  const low = stock.filter(s => +s.balance <= +(s.reorder_level || 0) && s.active);
+  const value = stock.reduce((x, s) => x + (+s.balance || 0) * (+s.rate || 0), 0);
+  const outstanding = dues.reduce((x, d) => x + Math.max(0, +d.due || 0), 0);
+  $("stats").innerHTML = tile("Items", stock.length) + tile("In stock", stock.reduce((x, s) => x + (+s.balance || 0), 0)) +
+    tile("Low stock", low.length, low.length ? "red" : "") +
+    tile("Given free", stock.reduce((x, s) => x + (+s.given_free || 0), 0)) +
+    tile("Given paid", stock.reduce((x, s) => x + (+s.given_paid || 0), 0));
+  $("money").innerHTML = tile("Stock value", inr(Math.round(value)), "pct") +
+    tile("Billed to people", inr(dues.reduce((x, d) => x + (+d.billed || 0), 0))) +
+    tile("Collected", inr(dues.reduce((x, d) => x + (+d.paid || 0), 0)), "grn") +
+    tile("Outstanding", inr(outstanding), outstanding ? "red" : "");
+
+  let list = stock.slice();
+  if (filter.cat) list = list.filter(s => s.category === filter.cat);
+  const q = filter.q.toLowerCase();
+  if (q) list = list.filter(s => [s.name, s.code].some(v => (v || "").toLowerCase().includes(q)));
+  list.sort((a,b) => { let x = a[filter.sort] ?? "", y = b[filter.sort] ?? "";
+    if (["opening_qty","balance"].includes(filter.sort)){ x = +x || 0; y = +y || 0; }
+    else { x = String(x).toLowerCase(); y = String(y).toLowerCase(); }
+    return x < y ? -filter.dir : x > y ? filter.dir : 0; });
+  $("rows").innerHTML = list.map(s => `<tr class="row" data-id="${s.id}">
+    <td>${esc(s.code || "")}</td><td>${esc(s.name)}${s.active ? "" : ' <span class="pill cold">off</span>'}</td><td>${esc(s.category || "")}</td>
+    <td>${s.opening_qty ?? 0}</td><td>${s.given_free}</td><td>${s.given_paid}</td>
+    <td><b${+s.balance <= +(s.reorder_level || 0) ? ' style="color:var(--warn)"' : ""}>${s.balance}</b> <span style="color:var(--muted);font-size:11px">${esc(s.unit || "")}</span></td>
+    <td>${inr(s.rate)}</td><td class="side">${inr(Math.round((+s.balance || 0) * (+s.rate || 0)))}</td></tr>`).join("");
+  $("empty").classList.toggle("hidden", list.length > 0);
+  document.querySelectorAll("#rows tr.row").forEach(el => el.onclick = () => openItem(el.dataset.id));
+  document.querySelectorAll("th.sort").forEach(th => th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); });
+
+  const imap = Object.fromEntries(itemsRaw.map(i => [i.id, i.name])), pmap = Object.fromEntries(ctx.profiles.map(p => [p.id, p.full_name]));
+  let ml = moves.slice();
+  if (filter.mtype) ml = ml.filter(m => m.move_type === filter.mtype);
+  const mq = filter.mq.toLowerCase();
+  if (mq) ml = ml.filter(m => [m.person, imap[m.item_id], m.note].some(v => (v || "").toLowerCase().includes(mq)));
+  $("mrows").innerHTML = ml.slice(0, 500).map(m => {
+    const col = { purchase: "done", free: "talk", paid: "hot", return: "done", adjust: "cold" }[m.move_type] || "talk";
+    return `<tr><td>${fmtY(m.move_date)}</td><td>${esc(imap[m.item_id] || "")}</td><td><span class="pill ${col}">${esc(m.move_type)}</span></td>
+      <td>${m.qty}</td><td>${esc(m.person || "")}${m.person_type && m.person ? ` <span style="color:var(--muted);font-size:11px">${esc(m.person_type)}</span>` : ""}</td>
+      <td>${m.move_type === "paid" ? inr(m.amount) : "—"}</td><td class="side">${esc(pmap[m.by_user] || "")}</td></tr>`; }).join("");
+
+  const dq = filter.dq.toLowerCase();
+  const dl = dues.filter(d => !dq || (d.person || "").toLowerCase().includes(dq)).sort((a,b) => (+b.due || 0) - (+a.due || 0));
+  $("drows").innerHTML = dl.map(d => `<tr class="row" data-person="${esc(d.person)}" style="cursor:pointer"><td>${esc(d.person)}</td><td>${esc(d.person_type || "")}</td>
+    <td>${inr(d.billed)}</td><td>${inr(d.paid)}</td><td class="side"><b style="color:${+d.due > 0 ? "var(--warn)" : "var(--green)"}">${inr(d.due)}</b></td></tr>`).join("");
+  $("dempty").classList.toggle("hidden", dl.length > 0);
+  document.querySelectorAll("#drows tr.row").forEach(el => el.onclick = () => openPerson(el.dataset.person));
+}
+$("q").oninput = e => { filter.q = e.target.value; render(); };
+$("fCat").onchange = e => { filter.cat = e.target.value; render(); };
+$("mq").oninput = e => { filter.mq = e.target.value; render(); };
+$("mType").onchange = e => { filter.mtype = e.target.value; render(); };
+$("dq").oninput = e => { filter.dq = e.target.value; render(); };
+
+/* ---------- item ---------- */
+function openItem(id){
+  const it = id ? itemsRaw.find(x => x.id === id) : null; editingId = id || null;
+  const s = id ? stock.find(x => x.id === id) : null;
+  const ro = !isAdm();
+  $("dTitle").textContent = it ? it.name : "New item";
+  $("dMeta").textContent = s ? `${s.balance} ${s.unit || ""} in stock` : "";
+  $("dbody").innerHTML = `<div class="grid2">
+    <div><label>Item code</label><input id="iCode" value="${esc(it?.code || "")}" ${ro ? "disabled" : ""}></div>
+    <div><label>Item name</label><input id="iName" value="${esc(it?.name || "")}" ${ro ? "disabled" : ""}></div>
+    <div><label>Category <button class="btn ghost small" data-add="category" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="iCat" ${ro ? "disabled" : ""}><option value=""></option>${opts("category").map(o => `<option ${it?.category === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Unit <button class="btn ghost small" data-add="unit" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="iUnit" ${ro ? "disabled" : ""}><option value=""></option>${opts("unit").map(o => `<option ${it?.unit === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Opening quantity</label><input id="iOpen" type="number" value="${it?.opening_qty ?? 0}" ${ro ? "disabled" : ""}></div>
+    <div><label>Rate per unit</label><input id="iRate" type="number" min="0" value="${it?.rate ?? ""}" ${ro ? "disabled" : ""}></div>
+    <div><label>Warn below</label><input id="iReorder" type="number" min="0" value="${it?.reorder_level ?? 0}" ${ro ? "disabled" : ""}></div>
+  </div>
+  <label>Note</label><textarea id="iNote" rows="2" ${ro ? "disabled" : ""}>${esc(it?.note || "")}</textarea>
+  <label class="toggle"><input type="checkbox" id="iActive" ${it ? (it.active ? "checked" : "") : "checked"} ${ro ? "disabled" : ""}> In use</label>
+  ${customInputs(it)}
+  <div class="err" id="iErr"></div>
+  <div style="display:flex;gap:10px;margin-top:8px">${ro ? "" : `<button class="btn" id="iSave">Save</button>`}
+    ${it && isAdm() ? `<button class="btn ghost" id="iDel" style="color:var(--warn);border-color:var(--warn)">Delete</button>` : ""}</div>
+  ${it ? `<h3 style="margin-top:22px">Movement</h3><ul class="hist" id="iHist"></ul>` : ""}`;
+  wireAdds();
+  if (it){ const ms = moves.filter(m => m.item_id === it.id).slice(0, 40);
+    const pmap = Object.fromEntries(ctx.profiles.map(p => [p.id, p.full_name]));
+    $("iHist").innerHTML = ms.length ? ms.map(m => `<li><div class="d">${fmtY(m.move_date)} · <span class="pill ${m.move_type === "paid" ? "hot" : m.move_type === "free" ? "talk" : "done"}">${esc(m.move_type)}</span> ${m.qty} ${esc(it.unit || "")} ${m.person ? "· " + esc(m.person) : ""} <span style="color:var(--muted)">${esc(pmap[m.by_user] || "")}</span></div>${m.note ? `<div class="n">${esc(m.note)}</div>` : ""}</li>`).join("") : `<li style="color:var(--muted)">Nothing recorded.</li>`; }
+  if ($("iSave")) $("iSave").onclick = async () => {
+    const name = $("iName").value.trim(); if (!name){ $("iErr").textContent = "Name is needed."; return; }
+    const rec = { code: $("iCode").value.trim() || null, name, category: $("iCat").value || null, unit: $("iUnit").value || null,
+      opening_qty: +$("iOpen").value || 0, rate: $("iRate").value === "" ? null : +$("iRate").value,
+      reorder_level: +$("iReorder").value || 0, note: $("iNote").value.trim() || null, active: $("iActive").checked, extra: customValues() };
+    const r = editingId ? await sb.from("inv_items").update(rec).eq("id", editingId) : await sb.from("inv_items").insert({ ...rec, created_by: ctx.me.id });
+    if (r.error){ $("iErr").textContent = r.error.message; return; }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  };
+  if ($("iDel")) $("iDel").onclick = async () => {
+    const n = moves.filter(m => m.item_id === editingId).length;
+    if (n){ alert(`This item has ${n} movement record(s). Turn it off instead of deleting.`); return; }
+    if (!confirm("Delete this item?")) return;
+    const r = await sb.from("inv_items").delete().eq("id", editingId);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); closeDrawer(); render(); toast("Deleted");
+  };
+  show();
+}
+$("newItemBtn").onclick = () => openItem(null);
+
+/* ---------- issue / receive ---------- */
+$("issueBtn").onclick = () => {
+  editingId = null;
+  $("dTitle").textContent = "Issue or receive"; $("dMeta").textContent = "";
+  $("dbody").innerHTML = `<div class="grid2">
+    <div style="grid-column:1/-1"><label>Item</label><select id="mItem">${stock.filter(s => s.active).map(s => `<option value="${s.id}">${esc(s.name)} · ${s.balance} ${esc(s.unit || "")} in stock</option>`).join("")}</select></div>
+    <div><label>What happened</label><select id="mType2">
+      <option value="free">Given free to a person</option><option value="paid">Given to a person, chargeable</option>
+      <option value="purchase">Stock received</option><option value="return">Returned to stock</option><option value="adjust">Correction</option></select></div>
+    <div><label>Quantity</label><input id="mQty" type="number" min="0" step="1" value="1"></div>
+    <div id="pWrap"><label>Person <button class="btn ghost small" data-add="person" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="mPerson"><option value=""></option>${peopleList().map(p => `<option>${esc(p)}</option>`).join("")}</select></div>
+    <div id="ptWrap"><label>They are</label><select id="mPType"><option>employee</option><option>client</option><option>other</option></select></div>
+    <div id="rateWrap"><label>Rate charged</label><input id="mRate" type="number" min="0"></div>
+    <div><label>Date</label><input id="mDate" type="date" value="${today()}"></div>
+  </div>
+  <div id="amtBox" style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#eef3f8;display:flex;justify-content:space-between">
+    <span style="font-size:13px;color:var(--muted)">Amount to recover</span><b id="mAmt">₹0</b></div>
+  <label>Note</label><textarea id="mNote" rows="2"></textarea>
+  <div class="err" id="mErr"></div>
+  <div style="display:flex;gap:10px;margin-top:8px"><button class="btn" id="mSave">Record</button></div>`;
+  const sync = () => {
+    const t = $("mType2").value, it = stock.find(s => s.id === $("mItem").value);
+    const needsPerson = t === "free" || t === "paid", charge = t === "paid";
+    $("pWrap").style.display = needsPerson ? "" : "none"; $("ptWrap").style.display = needsPerson ? "" : "none";
+    $("rateWrap").style.display = charge ? "" : "none"; $("amtBox").style.display = charge ? "flex" : "none";
+    if (charge && $("mRate").value === "" && it) $("mRate").value = it.rate ?? "";
+    $("mAmt").textContent = inr((+$("mRate").value || 0) * (+$("mQty").value || 0));
+  };
+  ["mType2","mItem","mQty","mRate"].forEach(i => { $(i).oninput = sync; $(i).onchange = sync; });
+  sync();
+  $("mSave").onclick = async () => {
+    const t = $("mType2").value, qty = +$("mQty").value || 0;
+    if (!$("mItem").value || qty <= 0){ $("mErr").textContent = "Pick an item and a quantity."; return; }
+    if ((t === "free" || t === "paid") && !$("mPerson").value.trim()){ $("mErr").textContent = "Who is it going to?"; return; }
+    const it = stock.find(s => s.id === $("mItem").value);
+    if ((t === "free" || t === "paid") && qty > +it.balance && !confirm(`Only ${it.balance} in stock. Record anyway?`)) return;
+    const rate = $("mRate").value === "" ? null : +$("mRate").value;
+    const rec = { item_id: $("mItem").value, move_type: t, qty, move_date: $("mDate").value || today(),
+      person: (t === "free" || t === "paid") ? $("mPerson").value.trim() : null,
+      person_type: (t === "free" || t === "paid") ? $("mPType").value : null,
+      rate: t === "paid" ? rate : null, amount: t === "paid" ? (rate || 0) * qty : null,
+      note: $("mNote").value.trim() || null, by_user: ctx.me.id };
+    const r = await sb.from("inv_moves").insert(rec);
+    if (r.error){ $("mErr").textContent = r.error.message; return; }
+    await load(); closeDrawer(); render(); toast("Recorded ✓");
+  };
+  show();
+};
+
+/* ---------- person / dues ---------- */
+function openPerson(person){
+  const d = dues.find(x => x.person === person) || { billed: 0, paid: 0, due: 0 };
+  const imap = Object.fromEntries(itemsRaw.map(i => [i.id, i.name]));
+  const ms = moves.filter(m => m.person === person), ps = payments.filter(p => p.person === person);
+  $("dTitle").textContent = person; $("dMeta").textContent = `${inr(d.due)} outstanding`;
+  $("dbody").innerHTML = `<div class="kv" style="margin-bottom:14px"><div>Billed</div><div>${inr(d.billed)}</div><div>Paid</div><div>${inr(d.paid)}</div>
+    <div>Outstanding</div><div><b style="color:${+d.due > 0 ? "var(--warn)" : "var(--green)"}">${inr(d.due)}</b></div></div>
+  ${canEdit() ? `<button class="btn" id="pPay">Record a payment</button>` : ""}
+  <h3 style="margin-top:22px">Items taken</h3><ul class="hist">${ms.map(m => `<li><div class="d">${fmtY(m.move_date)} · <span class="pill ${m.move_type === "paid" ? "hot" : "talk"}">${esc(m.move_type)}</span> ${m.qty} × ${esc(imap[m.item_id] || "")} ${m.move_type === "paid" ? "· " + inr(m.amount) : ""}</div>${m.note ? `<div class="n">${esc(m.note)}</div>` : ""}</li>`).join("") || `<li style="color:var(--muted)">Nothing yet.</li>`}</ul>
+  <h3 style="margin-top:18px">Payments</h3><ul class="hist">${ps.map(p => `<li><div class="d">${fmtY(p.pay_date)} · ${inr(p.amount)} ${p.mode ? "· " + esc(p.mode) : ""}</div>${p.note ? `<div class="n">${esc(p.note)}</div>` : ""}</li>`).join("") || `<li style="color:var(--muted)">No payments recorded.</li>`}</ul>`;
+  if ($("pPay")) $("pPay").onclick = () => recordPayment(person);
+  show();
+}
+async function recordPayment(person){
+  const who = person || prompt("Payment from whom?\n\n" + peopleList().join("\n")); if (!who) return;
+  const amt = prompt(`Amount received from ${who}:`); if (!amt) return;
+  const mode = prompt("Mode (cash / UPI / salary deduction):", "cash");
+  const r = await sb.from("inv_payments").insert({ person: who, amount: +amt, mode: mode || null, pay_date: today(), by_user: ctx.me.id });
+  if (r.error){ alert(r.error.message); return; }
+  await load(); closeDrawer(); render(); toast("Payment recorded ✓");
+}
+$("payBtn").onclick = () => recordPayment(null);
+
+/* ---------- monthly closing ---------- */
+let repRows = [];
+$("repBtn").onclick = () => { $("repMonth").value = today().slice(0,7); runRep(); $("repModal").classList.remove("hidden"); };
+$("repClose").onclick = () => $("repModal").classList.add("hidden");
+$("repRun").onclick = runRep;
+function runRep(){
+  const m = $("repMonth").value || today().slice(0,7);
+  const end = m + "-31";
+  repRows = itemsRaw.map(i => {
+    const ms = moves.filter(x => x.item_id === i.id && (x.move_date || "") <= end);
+    const inQ = ms.filter(x => ["purchase","return"].includes(x.move_type)).reduce((s,x) => s + (+x.qty||0), 0);
+    const free = ms.filter(x => x.move_type === "free").reduce((s,x) => s + (+x.qty||0), 0);
+    const paid = ms.filter(x => x.move_type === "paid").reduce((s,x) => s + (+x.qty||0), 0);
+    const adj = ms.filter(x => x.move_type === "adjust").reduce((s,x) => s + (+x.qty||0), 0);
+    const bal = (+i.opening_qty || 0) + inQ - free - paid + adj;
+    return { Code: i.code || "", Item: i.name, Opening: +i.opening_qty || 0, Received: inQ, "Given free": free, "Given paid": paid, Adjustment: adj, Closing: bal, Rate: +i.rate || 0, Value: Math.round(bal * (+i.rate || 0)) };
+  });
+  const t = repRows.reduce((s, r) => ({ o: s.o + r.Opening, i: s.i + r.Received, f: s.f + r["Given free"], p: s.p + r["Given paid"], a: s.a + r.Adjustment, c: s.c + r.Closing, v: s.v + r.Value }), { o:0,i:0,f:0,p:0,a:0,c:0,v:0 });
+  repRows.push({ Code: "", Item: "TOTAL", Opening: t.o, Received: t.i, "Given free": t.f, "Given paid": t.p, Adjustment: t.a, Closing: t.c, Rate: "", Value: t.v });
+  const cols = Object.keys(repRows[0]);
+  $("repTable").innerHTML = `<thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>` +
+    repRows.map(r => `<tr${r.Item === "TOTAL" ? ' style="font-weight:600;background:#f0f2ef"' : ""}>${cols.map(c => `<td>${c === "Value" || c === "Rate" ? (r[c] === "" ? "" : inr(r[c])) : esc(String(r[c]))}</td>`).join("")}</tr>`).join("") + "</tbody>";
+}
+$("repXls").onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), "Closing"); XLSX.writeFile(wb, `GHC_inventory_closing_${$("repMonth").value}.xlsx`); };
+
+function wireAdds(){
+  document.querySelectorAll("[data-add]").forEach(b => b.onclick = async e => { e.preventDefault();
+    if (!isAdm()){ toast("Only an admin can add to this list"); return; }
+    const key = b.dataset.add, v = prompt("Add an option:"); if (!v) return;
+    const r = await sb.from("lookup_values").insert({ module: MOD, list_key: key, value: v.trim(), sort: lookups.filter(l => l.list_key === key).length }).select().single();
+    if (r.error){ alert(r.error.message); return; }
+    lookups.push(r.data);
+    const sel = b.closest("div").querySelector("select");
+    const o = document.createElement("option"); o.textContent = v.trim(); sel.appendChild(o); sel.value = v.trim(); toast("Added ✓"); });
+}
+function show(){ $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0; }
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+
+const LIST_LABELS = { person: "People (beyond app users)", category: "Category", unit: "Unit" };
+async function drawList(){ if (!Object.keys(usage).length) usage = await lmLoadUsage(MOD);
+  lmRender({ mod: MOD, listSel: $("listSel"), itemsEl: $("listItems"), labels: LIST_LABELS, lookups, usage, onChange: () => render() }); }
+$("listBtn").onclick = () => { $("listSel").innerHTML = Object.keys(LIST_LABELS).map(k => `<option value="${k}">${esc(LIST_LABELS[k])}</option>`).join(""); drawList(); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listSel").onchange = () => drawList();
+$("listAdd").onclick = async () => { const k = $("listSel").value, v = $("listNew").value.trim(); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: MOD, list_key: k, value: v, sort: lookups.filter(l => l.list_key === k).length }).select().single();
+  if (r.error){ toast(r.error.message); return; } lookups.push(r.data); $("listNew").value = ""; usage = {}; await drawList(); toast("Added ✓"); };
+$("cfBtn").onclick = () => { fieldMgr(MOD); $("cfModal").classList.remove("hidden"); };
+$("cfClose").onclick = () => $("cfModal").classList.add("hidden");
+$("cfAdd").onclick = () => addCustomField(MOD);
+$("xlsBtn").onclick = () => {
+  const imap = Object.fromEntries(itemsRaw.map(i => [i.id, i.name]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stock.map(s => ({ Code: s.code || "", Item: s.name, Category: s.category || "", Opening: s.opening_qty, "Given free": s.given_free, "Given paid": s.given_paid, Balance: s.balance, Rate: s.rate, Value: Math.round((+s.balance||0) * (+s.rate||0)) }))), "Stock");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(moves.map(m => ({ Date: m.move_date, Item: imap[m.item_id] || "", Kind: m.move_type, Qty: m.qty, Person: m.person || "", Type: m.person_type || "", Amount: m.amount ?? "", Note: m.note || "" }))), "Movement");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dues.map(d => ({ Person: d.person, Type: d.person_type || "", Billed: d.billed, Paid: d.paid, Outstanding: d.due }))), "Dues");
+  XLSX.writeFile(wb, `GHC_inventory_${today()}.xlsx`);
+};
+</script>
+</body>
+</html>
