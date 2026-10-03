@@ -112,6 +112,16 @@
   </div>
 </div>
 
+<div id="listModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:640px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Dropdown lists</h2>
+      <select id="listSel" style="width:auto"></select><button class="x" id="listClose">×</button></div>
+    <p class="fml" style="margin:8px 0 0">Turn an option off to hide it from new entries. Delete only works when nothing uses it — merge duplicates first.</p>
+    <ul id="listItems" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="listNew" placeholder="Add a new option"><button class="btn small" id="listAdd">Add</button></div>
+  </div>
+</div>
+
 <!-- TYPES -->
 <div id="typesModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="upbox" style="max-width:420px">
@@ -143,7 +153,7 @@ const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
   shellHeader("Insurance", ctx);
   await load();
   $("app").classList.remove("hidden");
-  if (ctx.isSuper || ctx.level === "admin"){ $("typesBtn").classList.remove("hidden"); $("filesBtn").classList.remove("hidden"); }
+  if (ctx.isSuper || ctx.level === "admin"){ $("typesBtn").classList.remove("hidden"); $("filesBtn").classList.remove("hidden"); $("listBtn").classList.remove("hidden"); }
   if (!canEdit()){ $("newBtn").classList.add("hidden"); }
   render();
 })();
@@ -342,9 +352,91 @@ function runReport(){
 }
 $("rXls").onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), "Premium"); XLSX.writeFile(wb, `GHC_premium_${$("rFrom").value}_${$("rTo").value}.xlsx`); };
 
+/* ===== shared list manager (v6.4) ===== */
+async function lmLoadUsage(mod){
+  try { const { data, error } = await sb.rpc("lookup_usage", { m: mod }); if (error) throw error;
+    const u = {}; (data || []).forEach(r => u[r.list_key + "||" + r.value] = +r.uses); return u; } catch (e){ return {}; }
+}
+function lmNorm(s){ return (s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function lmRender(cfg){
+  const { mod, listSel, itemsEl, labels, lookups, usage, onChange } = cfg;
+  const k = listSel.value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  const dupe = {}; items.forEach(i => { const n = lmNorm(i.value); (dupe[n] ||= []).push(i.value); });
+  itemsEl.innerHTML = items.map(i => {
+    const n = usage[k + "||" + i.value] || 0;
+    const isDupe = dupe[lmNorm(i.value)].length > 1;
+    const count = n ? `<span class="pill ${isDupe ? "hot" : "talk"}">${n} record${n === 1 ? "" : "s"}${isDupe ? " · looks duplicate" : ""}</span>`
+                    : `<span style="color:var(--muted);font-size:12px">not used${isDupe ? " · looks duplicate" : ""}</span>`;
+    return `<li style="align-items:center;gap:10px">
+      <span style="flex:1">${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span>
+      ${count}
+      ${isDupe ? `<button class="btn ghost small" data-merge="${esc(i.value)}">Merge</button>` : ""}
+      <button class="btn ghost small" data-toggle="${i.id}">${i.active ? "Turn off" : "Turn on"}</button>
+      <button class="btn ghost small" data-del="${esc(i.value)}" ${n ? `disabled title="Used by ${n} record${n === 1 ? "" : "s"} — merge it first" style="opacity:.45"` : 'style="color:var(--warn);border-color:var(--warn)"'}>Delete</button>
+    </li>`;
+  }).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+
+  itemsEl.querySelectorAll("[data-toggle]").forEach(b => b.onclick = async () => {
+    const it = lookups.find(l => String(l.id) === b.dataset.toggle);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; lmRender(cfg); onChange && onChange();
+  });
+  itemsEl.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const v = b.dataset.del;
+    if (!confirm(`Delete "${v}" from this list? It cannot be undone.`)) return;
+    const { error } = await sb.rpc("lookup_delete", { m: mod, lk: k, v });
+    if (error){ alert(error.message); return; }
+    const i = lookups.findIndex(l => l.list_key === k && l.value === v); if (i >= 0) lookups.splice(i, 1);
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange(); toast("Deleted ✓");
+  });
+  itemsEl.querySelectorAll("[data-merge]").forEach(b => b.onclick = async () => {
+    const from = b.dataset.merge;
+    const others = dupe[lmNorm(from)].filter(v => v !== from);
+    const to = prompt(`Move every record from "${from}" into which option?\n\n${others.join("\n")}`, others[0]);
+    if (!to) return;
+    const { data, error } = await sb.rpc("lookup_merge", { m: mod, lk: k, from_value: from, to_value: to });
+    if (error){ alert(error.message); return; }
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange();
+    toast(`${data || 0} record${data === 1 ? "" : "s"} moved to "${to}" — you can delete the old one now`, 4000);
+  });
+}
+
+const LIST_LABELS = { plan: "Plan name", nomrel: "Nominee relation", rm: "RM" };
+let usage = {};
+async function drawList(){
+  if (!Object.keys(usage).length) usage = await lmLoadUsage("insurance");
+  lmRender({ mod: "insurance", listSel: $("listSel"), itemsEl: $("listItems"), labels: LIST_LABELS, lookups, usage,
+    onChange: () => { $("pRm").innerHTML = `<option value="">— none —</option>` + opts("rm").map(o => `<option>${esc(o)}</option>`).join("");
+      $("pPlan").innerHTML = `<option value=""></option>` + opts("plan").map(o => `<option>${esc(o)}</option>`).join(""); render(); } });
+}
+$("listBtn").onclick = () => { $("listSel").innerHTML = Object.keys(LIST_LABELS).map(k => `<option value="${k}">${esc(LIST_LABELS[k])}</option>`).join(""); drawList(); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listSel").onchange = () => drawList();
+$("listAdd").onclick = async () => {
+  const k = $("listSel").value, v = $("listNew").value.trim(); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: "insurance", list_key: k, value: v, sort: lookups.filter(l => l.list_key === k).length }).select().single();
+  if (r.error){ toast(r.error.message); return; }
+  lookups.push(r.data); $("listNew").value = ""; usage = {}; await drawList(); toast("Added ✓");
+};
+
 /* ===== types (admin) ===== */
-$("typesBtn").onclick = () => { renderTypes(); $("typesModal").classList.remove("hidden"); }; $("tClose").onclick = () => $("typesModal").classList.add("hidden");
-function renderTypes(){ $("tList").innerHTML = types.map(t => `<li><span>${esc(t.name)}${t.active ? "" : ' <span class="pill cold">inactive</span>'}</span><a href="#" data-t="${t.id}">${t.active ? "Deactivate" : "Activate"}</a></li>`).join("");
+$("typesBtn").onclick = async () => { await renderTypes(); $("typesModal").classList.remove("hidden"); }; $("tClose").onclick = () => $("typesModal").classList.add("hidden");
+let typeUse = {};
+async function renderTypes(){
+  try { const { data } = await sb.rpc("ins_type_usage"); (data || []).forEach(r => typeUse[r.name] = +r.uses); } catch (e){}
+  $("tList").innerHTML = types.map(t => { const n = typeUse[t.name] || 0;
+    return `<li><span>${esc(t.name)}${t.active ? "" : ' <span class="pill cold">inactive</span>'}</span>
+      <span class="pill talk">${n ? n + " polic" + (n === 1 ? "y" : "ies") : "not used"}</span>
+      <a href="#" data-t="${t.id}">${t.active ? "Turn off" : "Turn on"}</a>
+      ${n ? "" : `<a href="#" data-tdel="${t.id}" style="color:var(--warn)">Delete</a>`}</li>`; }).join("");
+  document.querySelectorAll("[data-tdel]").forEach(a => a.onclick = async e => { e.preventDefault();
+    const t = types.find(x => x.id == a.dataset.tdel);
+    if (!confirm(`Delete insurance type "${t.name}"?`)) return;
+    const r = await sb.from("ins_types").delete().eq("id", t.id);
+    if (r.error){ toast(r.error.message); return; }
+    await load(); renderTypes(); render(); toast("Deleted ✓"); });
   document.querySelectorAll("[data-t]").forEach(a => a.onclick = async e => { e.preventDefault(); const t = types.find(x => x.id == a.dataset.t); const r = await sb.from("ins_types").update({ active: !t.active }).eq("id", t.id); if (r.error){ toast(r.error.message); return; } t.active = !t.active; await load(); renderTypes(); render(); }); }
 $("tAdd").onclick = async () => { const n = $("tNew").value.trim(); if (!n) return; const r = await sb.from("ins_types").insert({ name: n }); if (r.error){ toast(r.error.message); return; } $("tNew").value = ""; await load(); renderTypes(); render(); toast("Type added ✓"); };
 
