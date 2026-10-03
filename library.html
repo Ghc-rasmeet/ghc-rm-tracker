@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · Training Library</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="common.js"></script>
+<style>
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.card2{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:14px 16px;cursor:pointer;transition:box-shadow .15s}
+.card2:hover{box-shadow:0 6px 18px rgba(0,0,0,.08);border-color:var(--green)}
+.card2 h4{margin:0 0 4px;font-size:15px;font-weight:600;line-height:1.3}
+.card2 .sum{font-size:13px;color:var(--muted);line-height:1.4;margin:6px 0 10px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.card2 .foot{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted)}
+.tag{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11px}
+.ftype{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:5px;font-size:10px;font-weight:600;color:#fff}
+.f-pdf{background:#c8322b} .f-doc{background:#2f6fb5} .f-ppt{background:#d2691e} .f-xls{background:#1d5c3a} .f-img{background:#7a5fa0} .f-oth{background:#8a8f8b}
+</style>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="band"><div class="grp"><div class="rvhead">Library</div><div class="stats" id="stats"></div></div></div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search title, summary, speaker, tag or note">
+      <select id="fKind" style="width:auto"><option value="">All kinds</option></select>
+      <select id="fDept" style="width:auto"><option value="">All departments</option></select>
+      <select id="fAud" style="width:auto"><option value="">For everyone</option></select>
+      <button class="btn ghost small" id="clearF">Clear ×</button>
+      <button class="btn small" id="newBtn">+ Add to library</button>
+      <button class="btn ghost small" id="viewBtn">Table view</button>
+      <button class="btn ghost small hidden" id="listBtn">Lists</button>
+      <button class="btn ghost small hidden" id="xlsBtn">Export</button>
+    </div>
+
+    <div id="cardView" class="cards"></div>
+    <div id="tableView" class="tablewrap hidden"><table><thead><tr>
+      <th class="sort" data-k="title">Title</th><th>Kind</th><th>Department</th><th>For whom</th>
+      <th>Speaker</th><th class="sort" data-k="held_on">Held on</th><th class="side">Files</th>
+    </tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="empty hidden" id="empty">Nothing in the library yet. Add the first training note or deck.</div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle"></h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+
+<div id="listModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:600px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Dropdown lists</h2>
+      <select id="listSel" style="width:auto"></select><button class="x" id="listClose">×</button></div>
+    <ul id="listItems" class="files" style="list-style:none;padding:0;margin:12px 0"></ul>
+    <div style="display:flex;gap:8px"><input id="listNew" placeholder="Add a new option"><button class="btn small" id="listAdd">Add</button></div>
+  </div>
+</div>
+
+<div id="busy" class="hidden"><div class="sp"></div><div id="busyTxt">Working…</div></div>
+
+<script>
+const MOD = "train";
+let ctx, items = [], files = [], editingId = null, cardMode = true;
+let filter = { q: "", kind: "", dept: "", aud: "", sort: "created_at", dir: -1 };
+/* ---- shared helpers for module pages ---- */
+let lookups = [], customFields = [], usage = {};
+const opts = key => lookups.filter(l => l.list_key === key && l.active).sort((a,b) => a.sort - b.sort).map(l => l.value);
+const isAdm = () => ctx.isSuper || ctx.level === "admin";
+const F = k => ctx.isSuper ? true : true;
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+async function loadShared(mod){
+  try { lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === mod); } catch (e){ lookups = []; }
+  try { customFields = (await fetchAll("module_fields","module, field_key, label, ftype, grp, sort, is_custom")).filter(f => f.module === mod && f.is_custom).sort((a,b) => a.sort - b.sort); } catch (e){ customFields = []; }
+}
+function customInputs(rec){
+  if (!customFields.length) return "";
+  return `<h3 style="margin-top:16px">More details</h3><div class="grid2">` + customFields.map(f => {
+    const v = (rec && rec.extra && rec.extra[f.field_key]) ?? "";
+    let input;
+    if (f.ftype.startsWith("list:")) input = `<select id="x_${f.field_key}"><option value=""></option>` + opts(f.ftype.slice(5)).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+    else if (f.ftype === "yesno") input = `<select id="x_${f.field_key}"><option value=""></option><option ${v === "Yes" ? "selected" : ""}>Yes</option><option ${v === "No" ? "selected" : ""}>No</option></select>`;
+    else input = `<input id="x_${f.field_key}" type="${f.ftype === "date" ? "date" : f.ftype === "number" ? "number" : "text"}" value="${esc(v)}">`;
+    return `<div><label>${esc(f.label)}</label>${input}</div>`;
+  }).join("") + `</div>`;
+}
+function customValues(){
+  const o = {};
+  customFields.forEach(f => { const el = $("x_" + f.field_key); if (el && el.value !== "") o[f.field_key] = el.value; });
+  return o;
+}
+/* custom field manager */
+function fieldMgr(mod){
+  $("cfList").innerHTML = customFields.map(f => `<li><span>${esc(f.label)} <span style="color:var(--muted);font-size:12px">· ${esc(f.ftype)}</span></span>
+    <a href="#" data-cfdel="${f.field_key}" style="color:var(--warn)">Remove</a></li>`).join("") || `<li style="color:var(--muted)">No extra fields yet.</li>`;
+  document.querySelectorAll("[data-cfdel]").forEach(a => a.onclick = async e => { e.preventDefault();
+    if (!confirm("Remove this field? Values already entered stay in the record but stop being shown.")) return;
+    const r = await sb.from("module_fields").delete().eq("module", mod).eq("field_key", a.dataset.cfdel);
+    if (r.error){ alert(r.error.message); return; }
+    customFields = customFields.filter(f => f.field_key !== a.dataset.cfdel); fieldMgr(mod); toast("Removed"); });
+}
+async function addCustomField(mod){
+  const label = $("cfLabel").value.trim(); if (!label){ toast("Give the field a name"); return; }
+  const key = "x_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const r = await sb.from("module_fields").insert({ module: mod, field_key: key, label, ftype: $("cfType").value, grp: "More details", sort: 900 + customFields.length, is_custom: true }).select().single();
+  if (r.error){ alert(r.error.message); return; }
+  customFields.push(r.data); $("cfLabel").value = ""; fieldMgr(mod); toast("Field added ✓");
+}
+
+/* ===== shared list manager (v6.4) ===== */
+async function lmLoadUsage(mod){
+  try { const { data, error } = await sb.rpc("lookup_usage", { m: mod }); if (error) throw error;
+    const u = {}; (data || []).forEach(r => u[r.list_key + "||" + r.value] = +r.uses); return u; } catch (e){ return {}; }
+}
+function lmNorm(s){ return (s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function lmRender(cfg){
+  const { mod, listSel, itemsEl, labels, lookups, usage, onChange } = cfg;
+  const k = listSel.value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  const dupe = {}; items.forEach(i => { const n = lmNorm(i.value); (dupe[n] ||= []).push(i.value); });
+  itemsEl.innerHTML = items.map(i => {
+    const n = usage[k + "||" + i.value] || 0;
+    const isDupe = dupe[lmNorm(i.value)].length > 1;
+    const count = n ? `<span class="pill ${isDupe ? "hot" : "talk"}">${n} record${n === 1 ? "" : "s"}${isDupe ? " · looks duplicate" : ""}</span>`
+                    : `<span style="color:var(--muted);font-size:12px">not used${isDupe ? " · looks duplicate" : ""}</span>`;
+    return `<li style="align-items:center;gap:10px">
+      <span style="flex:1">${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span>
+      ${count}
+      ${isDupe ? `<button class="btn ghost small" data-merge="${esc(i.value)}">Merge</button>` : ""}
+      <button class="btn ghost small" data-toggle="${i.id}">${i.active ? "Turn off" : "Turn on"}</button>
+      <button class="btn ghost small" data-del="${esc(i.value)}" ${n ? `disabled title="Used by ${n} record${n === 1 ? "" : "s"} — merge it first" style="opacity:.45"` : 'style="color:var(--warn);border-color:var(--warn)"'}>Delete</button>
+    </li>`;
+  }).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+
+  itemsEl.querySelectorAll("[data-toggle]").forEach(b => b.onclick = async () => {
+    const it = lookups.find(l => String(l.id) === b.dataset.toggle);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; lmRender(cfg); onChange && onChange();
+  });
+  itemsEl.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const v = b.dataset.del;
+    if (!confirm(`Delete "${v}" from this list? It cannot be undone.`)) return;
+    const { error } = await sb.rpc("lookup_delete", { m: mod, lk: k, v });
+    if (error){ alert(error.message); return; }
+    const i = lookups.findIndex(l => l.list_key === k && l.value === v); if (i >= 0) lookups.splice(i, 1);
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange(); toast("Deleted ✓");
+  });
+  itemsEl.querySelectorAll("[data-merge]").forEach(b => b.onclick = async () => {
+    const from = b.dataset.merge;
+    const others = dupe[lmNorm(from)].filter(v => v !== from);
+    const to = prompt(`Move every record from "${from}" into which option?\n\n${others.join("\n")}`, others[0]);
+    if (!to) return;
+    const { data, error } = await sb.rpc("lookup_merge", { m: mod, lk: k, from_value: from, to_value: to });
+    if (error){ alert(error.message); return; }
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange();
+    toast(`${data || 0} record${data === 1 ? "" : "s"} moved to "${to}" — you can delete the old one now`, 4000);
+  });
+}
+
+
+const extOf = n => (n.split(".").pop() || "").toLowerCase();
+const typeClass = n => { const e = extOf(n);
+  if (e === "pdf") return ["f-pdf","PDF"];
+  if (["doc","docx"].includes(e)) return ["f-doc","DOC"];
+  if (["ppt","pptx"].includes(e)) return ["f-ppt","PPT"];
+  if (["xls","xlsx","csv"].includes(e)) return ["f-xls","XLS"];
+  if (["jpg","jpeg","png","gif","webp"].includes(e)) return ["f-img","IMG"];
+  return ["f-oth", e.slice(0,3).toUpperCase() || "FILE"]; };
+
+(async () => {
+  ctx = await requireAuth(MOD); if (!ctx) return;
+  shellHeader("Training Library", ctx);
+  await loadShared(MOD); await load();
+  $("app").classList.remove("hidden");
+  if (!canEdit()) $("newBtn").classList.add("hidden");
+  if (isAdm()) ["listBtn","xlsBtn"].forEach(i => $(i).classList.remove("hidden"));
+  render();
+})();
+
+async function load(){
+  items = await fetchAll("library_items", "*", { col: "created_at", asc: false });
+  files = await fetchAll("library_files", "*", { col: "uploaded_at", asc: false });
+  $("fKind").innerHTML = `<option value="">All kinds</option>` + opts("kind").map(o => `<option>${esc(o)}</option>`).join("");
+  $("fDept").innerHTML = `<option value="">All departments</option>` + opts("department").map(o => `<option>${esc(o)}</option>`).join("");
+  $("fAud").innerHTML = `<option value="">For everyone</option>` + opts("audience").map(o => `<option>${esc(o)}</option>`).join("");
+}
+
+function filtered(){
+  let l = items.filter(i => i.status !== "archived");
+  if (filter.kind) l = l.filter(i => i.kind === filter.kind);
+  if (filter.dept) l = l.filter(i => i.department === filter.dept || i.department === "All");
+  if (filter.aud) l = l.filter(i => i.audience === filter.aud || i.audience === "Everyone");
+  const q = filter.q.toLowerCase();
+  if (q) l = l.filter(i => [i.title, i.summary, i.note, i.speaker, (i.tags || []).join(" "),
+    ...files.filter(f => f.item_id === i.id).map(f => f.file_name)].some(v => (v || "").toLowerCase().includes(q)));
+  l.sort((a,b) => { const x = a[filter.sort] ?? "", y = b[filter.sort] ?? ""; return x < y ? -filter.dir : x > y ? filter.dir : 0; });
+  return l;
+}
+
+function render(){
+  const tile = (l, v, cls = "") => `<div class="stat ${cls}"><b>${v}</b><span>${l}</span></div>`;
+  const kinds = {}; items.forEach(i => kinds[i.kind] = (kinds[i.kind] || 0) + 1);
+  const top = Object.entries(kinds).sort((a,b) => b[1] - a[1]).slice(0, 3);
+  $("stats").innerHTML = tile("Items", items.length) + tile("Files", files.length) +
+    top.map(([k, n]) => tile(k, n)).join("") +
+    tile("Added this month", items.filter(i => (i.created_at || "").slice(0,7) === today().slice(0,7)).length, "grn");
+
+  const l = filtered();
+  $("cardView").innerHTML = l.map(i => {
+    const fs = files.filter(f => f.item_id === i.id);
+    return `<div class="card2" data-id="${i.id}">
+      <h4>${esc(i.title)}</h4>
+      <div class="foot"><span class="pill done">${esc(i.kind || "")}</span>${i.audience ? `<span class="tag">${esc(i.audience)}</span>` : ""}${i.department && i.department !== "All" ? `<span class="tag">${esc(i.department)}</span>` : ""}</div>
+      <div class="sum">${esc(i.summary || i.note || "")}</div>
+      <div class="foot">
+        ${fs.slice(0,4).map(f => { const [c, t] = typeClass(f.file_name); return `<span class="ftype ${c}" title="${esc(f.file_name)}">${t}</span>`; }).join("")}
+        ${fs.length > 4 ? `<span class="tag">+${fs.length - 4}</span>` : ""}
+        ${!fs.length ? `<span class="tag">note only</span>` : ""}
+        <span style="margin-left:auto">${i.speaker ? esc(i.speaker) + " · " : ""}${i.held_on ? fmtY(i.held_on) : fmtY((i.created_at || "").slice(0,10))}</span>
+      </div></div>`; }).join("");
+  $("rows").innerHTML = l.map(i => { const fs = files.filter(f => f.item_id === i.id);
+    return `<tr class="row" data-id="${i.id}"><td>${esc(i.title)}</td><td>${esc(i.kind || "")}</td><td>${esc(i.department || "")}</td>
+      <td>${esc(i.audience || "")}</td><td>${esc(i.speaker || "")}</td><td>${fmtY(i.held_on)}</td>
+      <td class="side">${fs.length || "—"}</td></tr>`; }).join("");
+  $("empty").classList.toggle("hidden", l.length > 0);
+  document.querySelectorAll(".card2, #rows tr.row").forEach(el => el.onclick = () => openItem(el.dataset.id));
+  document.querySelectorAll("th.sort").forEach(th => th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); });
+}
+$("q").oninput = e => { filter.q = e.target.value; render(); };
+$("fKind").onchange = e => { filter.kind = e.target.value; render(); };
+$("fDept").onchange = e => { filter.dept = e.target.value; render(); };
+$("fAud").onchange = e => { filter.aud = e.target.value; render(); };
+$("clearF").onclick = () => { filter = { ...filter, q: "", kind: "", dept: "", aud: "" }; ["q","fKind","fDept","fAud"].forEach(i => $(i).value = ""); render(); };
+$("viewBtn").onclick = () => { cardMode = !cardMode;
+  $("cardView").classList.toggle("hidden", !cardMode); $("tableView").classList.toggle("hidden", cardMode);
+  $("viewBtn").textContent = cardMode ? "Table view" : "Card view"; };
+
+/* ---------- drawer ---------- */
+function openItem(id){
+  const it = id ? items.find(x => x.id === id) : null; editingId = id || null;
+  const fs = it ? files.filter(f => f.item_id === it.id) : [];
+  const ro = !canEdit();
+  $("dTitle").textContent = it ? it.title : "Add to library";
+  $("dMeta").textContent = it ? [it.kind, it.audience, it.speaker].filter(Boolean).join(" · ") : "";
+  $("dbody").innerHTML = `<div class="grid2">
+    <div style="grid-column:1/-1"><label>Title</label><input id="lTitle" value="${esc(it?.title || "")}" placeholder="e.g. Importance of touch points" ${ro ? "disabled" : ""}></div>
+    <div><label>Kind <button class="btn ghost small" data-add="kind" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="lKind" ${ro ? "disabled" : ""}>${opts("kind").map(o => `<option ${it?.kind === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>For whom <button class="btn ghost small" data-add="audience" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="lAud" ${ro ? "disabled" : ""}><option value=""></option>${opts("audience").map(o => `<option ${it?.audience === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Department <button class="btn ghost small" data-add="department" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="lDept" ${ro ? "disabled" : ""}><option value=""></option>${opts("department").map(o => `<option ${it?.department === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Who gave it <button class="btn ghost small" data-add="speaker" style="padding:2px 8px;font-size:11px">+ add</button></label>
+      <select id="lSpeaker" ${ro ? "disabled" : ""}><option value=""></option>${[...new Set(opts("speaker").concat(ctx.profiles.map(p => p.full_name)))].map(o => `<option ${it?.speaker === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>
+    <div><label>Held on</label><input id="lDate" type="date" value="${it?.held_on || ""}" ${ro ? "disabled" : ""}></div>
+    <div><label>Tags <span style="color:var(--muted);font-weight:400">· comma separated</span></label><input id="lTags" value="${esc((it?.tags || []).join(", "))}" placeholder="process, discipline" ${ro ? "disabled" : ""}></div>
+  </div>
+  <label>In brief</label><textarea id="lSum" rows="3" placeholder="A few lines about what this covers" ${ro ? "disabled" : ""}>${esc(it?.summary || "")}</textarea>
+  <label>Full note <span style="color:var(--muted);font-weight:400">· optional, if you'd rather type than attach</span></label>
+  <textarea id="lNote" rows="8" ${ro ? "disabled" : ""}>${esc(it?.note || "")}</textarea>
+  ${customInputs(it)}
+
+  <h3 style="margin-top:18px">Files</h3>
+  <ul class="files" id="fileList"></ul>
+  ${ro ? "" : `<label style="margin-top:10px">Attach PDF, Word, PowerPoint, Excel or an image <span style="color:var(--muted);font-weight:400">· you can pick several</span></label>
+  <input type="file" id="lFiles" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png">`}
+  <div class="err" id="lErr"></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+    ${ro ? "" : `<button class="btn" id="lSave">${it ? "Update" : "Save to library"}</button>`}
+    ${it && canEdit() && F("delete_item") ? `<button class="btn ghost" id="lDel" style="color:var(--warn);border-color:var(--warn)">Delete</button>` : ""}
+  </div>`;
+  wireAdds(); drawFiles(fs);
+  if ($("lSave")) $("lSave").onclick = save;
+  if ($("lDel")) $("lDel").onclick = async () => {
+    if (!confirm("Delete this item and its files?")) return;
+    for (const f of fs) await sb.storage.from("library").remove([f.path]);
+    const r = await sb.from("library_items").delete().eq("id", editingId);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); closeDrawer(); render(); toast("Deleted");
+  };
+  show();
+}
+function drawFiles(fs){
+  $("fileList").innerHTML = fs.length ? fs.map(f => { const [c, t] = typeClass(f.file_name);
+    return `<li><span><span class="ftype ${c}" style="margin-right:8px">${t}</span>${esc(f.file_name)}
+      <span style="color:var(--muted)">· ${f.size_kb ? f.size_kb + " KB" : ""}</span></span>
+      <span style="white-space:nowrap"><a href="#" data-dl="${f.path}">Download</a>${canEdit() ? ` · <a href="#" data-fdel="${f.id}" style="color:var(--warn)">Remove</a>` : ""}</span></li>`; }).join("")
+    : `<li style="color:var(--muted)">No files attached.</li>`;
+  document.querySelectorAll("[data-dl]").forEach(a => a.onclick = async e => { e.preventDefault();
+    const { data, error } = await sb.storage.from("library").createSignedUrl(a.dataset.dl, 300);
+    if (error){ toast(error.message); return; } window.open(data.signedUrl, "_blank"); });
+  document.querySelectorAll("[data-fdel]").forEach(a => a.onclick = async e => { e.preventDefault();
+    const f = files.find(x => x.id === a.dataset.fdel);
+    if (!confirm(`Remove ${f.file_name}?`)) return;
+    await sb.storage.from("library").remove([f.path]);
+    const r = await sb.from("library_files").delete().eq("id", f.id);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); drawFiles(files.filter(x => x.item_id === editingId)); render(); toast("Removed"); });
+}
+async function save(){
+  const title = $("lTitle").value.trim(); if (!title){ $("lErr").textContent = "Give it a title."; return; }
+  const rec = { title, kind: $("lKind").value || null, audience: $("lAud").value || null, department: $("lDept").value || null,
+    speaker: $("lSpeaker").value || null, held_on: $("lDate").value || null,
+    tags: $("lTags").value.split(",").map(t => t.trim()).filter(Boolean),
+    summary: $("lSum").value.trim() || null, note: $("lNote").value.trim() || null,
+    extra: customValues(), updated_at: new Date().toISOString() };
+  $("lErr").textContent = "";
+  try {
+    let id = editingId;
+    if (id){ const r = await sb.from("library_items").update(rec).eq("id", id); if (r.error) throw r.error; }
+    else { const r = await sb.from("library_items").insert({ ...rec, author_user: ctx.me.id }).select("id").single(); if (r.error) throw r.error; id = r.data.id; }
+    const picked = $("lFiles") ? [...$("lFiles").files] : [];
+    if (picked.length){
+      $("busy").classList.remove("hidden");
+      let n = 0;
+      for (const f of picked){
+        $("busyTxt").textContent = `Uploading ${++n} of ${picked.length}`;
+        const safe = title.replace(/[^A-Za-z0-9]/g, "_").slice(0, 40);
+        const path = `${safe}_${id.slice(0,8)}/${Date.now()}_${f.name.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+        const up = await sb.storage.from("library").upload(path, f); if (up.error) throw up.error;
+        const r = await sb.from("library_files").insert({ item_id: id, path, file_name: f.name,
+          file_type: extOf(f.name), size_kb: Math.round(f.size / 1024), uploaded_by: ctx.me.id });
+        if (r.error) throw r.error;
+      }
+      $("busy").classList.add("hidden");
+    }
+    await load(); closeDrawer(); render(); toast("Saved ✓");
+  } catch (e){ $("busy").classList.add("hidden"); $("lErr").textContent = "Could not save: " + e.message; }
+}
+$("newBtn").onclick = () => openItem(null);
+function show(){ $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0; }
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+
+function wireAdds(){
+  document.querySelectorAll("[data-add]").forEach(b => b.onclick = async e => { e.preventDefault();
+    if (!isAdm()){ toast("Only an admin can add to this list"); return; }
+    const key = b.dataset.add, v = prompt("Add an option:"); if (!v) return;
+    const r = await sb.from("lookup_values").insert({ module: MOD, list_key: key, value: v.trim(), sort: lookups.filter(l => l.list_key === key).length }).select().single();
+    if (r.error){ alert(r.error.message); return; }
+    lookups.push(r.data);
+    const sel = b.closest("div").querySelector("select");
+    const o = document.createElement("option"); o.textContent = v.trim(); sel.appendChild(o); sel.value = v.trim(); toast("Added ✓"); });
+}
+
+const LIST_LABELS = { kind: "Kind", department: "Department", audience: "For whom", speaker: "Speaker" };
+async function drawList(){ if (!Object.keys(usage).length) usage = await lmLoadUsage(MOD);
+  lmRender({ mod: MOD, listSel: $("listSel"), itemsEl: $("listItems"), labels: LIST_LABELS, lookups, usage, onChange: () => render() }); }
+$("listBtn").onclick = () => { $("listSel").innerHTML = Object.keys(LIST_LABELS).map(k => `<option value="${k}">${esc(LIST_LABELS[k])}</option>`).join(""); drawList(); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listSel").onchange = () => drawList();
+$("listAdd").onclick = async () => { const k = $("listSel").value, v = $("listNew").value.trim(); if (!v) return;
+  const r = await sb.from("lookup_values").insert({ module: MOD, list_key: k, value: v, sort: lookups.filter(l => l.list_key === k).length }).select().single();
+  if (r.error){ toast(r.error.message); return; } lookups.push(r.data); $("listNew").value = ""; usage = {}; await drawList(); toast("Added ✓"); };
+$("xlsBtn").onclick = () => {
+  const pmap = Object.fromEntries(ctx.profiles.map(p => [p.id, p.full_name]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(items.map(i => ({ Title: i.title, Kind: i.kind || "", Department: i.department || "",
+    "For whom": i.audience || "", Speaker: i.speaker || "", "Held on": i.held_on || "", Tags: (i.tags || []).join(", "),
+    Summary: i.summary || "", Files: files.filter(f => f.item_id === i.id).length, "Added by": pmap[i.author_user] || "",
+    Added: (i.created_at || "").slice(0,10) }))), "Library");
+  XLSX.writeFile(wb, `GHC_training_library_${today()}.xlsx`);
+};
+</script>
+</body>
+</html>
