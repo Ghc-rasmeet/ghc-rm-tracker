@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHC Hub · KPI &amp; Culture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="common.js"></script>
+<style>
+.score{display:inline-block;min-width:34px;text-align:center;padding:2px 8px;border-radius:6px;font-weight:600;font-size:13px}
+.s-hi{background:#dfefe4;color:#1d5c3a} .s-mid{background:#fdf3e0;color:#9a6b12} .s-low{background:#fbecec;color:#a12b2b} .s-none{background:#f0f2ef;color:#8a8f8b;font-weight:400}
+.ybar{display:flex;gap:3px;align-items:flex-end;height:26px}
+.ybar span{width:11px;border-radius:2px 2px 0 0;background:var(--line)}
+.rater{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-top:10px}
+.rater.me{border-color:var(--green);background:#f7faf8}
+.rater h4{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.slide{display:flex;gap:10px;align-items:center} .slide input[type=range]{flex:1} .slide b{min-width:30px;text-align:right;font-size:16px}
+</style>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header><div class="bar"></div></header>
+  <main>
+    <div class="band">
+      <div class="grp"><div class="rvhead">This quarter</div><div class="stats" id="stats"></div></div>
+      <div class="grp"><div class="rvhead">Year so far</div><div class="stats" id="ystats"></div>
+        <div class="fml">Quarter score = (average KPI + average Culture) ÷ 2, out of 10 · Year = the four quarters added, out of 40</div></div>
+    </div>
+
+    <div class="controls">
+      <input id="q" class="grow" placeholder="Search employee or department">
+      <select id="qtr" style="width:auto"></select>
+      <select id="fDept" style="width:auto"><option value="">All departments</option></select>
+      <select id="fState" style="width:auto"><option value="">Everyone</option><option value="pending">Waiting on me</option><option value="done">Fully rated</option></select>
+      <button class="btn ghost small" id="clearF">Clear ×</button>
+      <button class="btn ghost small hidden" id="empBtn">Employees</button>
+      <button class="btn ghost small hidden" id="raterBtn">Who rates</button>
+      <button class="btn ghost small hidden" id="repBtn">Year report</button>
+      <button class="btn ghost small hidden" id="xlsBtn">Export</button>
+    </div>
+    <div id="chair" class="fml" style="margin:-6px 0 10px"></div>
+
+    <div class="tablewrap"><table><thead><tr>
+      <th class="sort" data-k="name">Employee</th><th>Department</th>
+      <th>HR · KPI</th><th>HR · Culture</th><th>Founder · KPI</th><th>Founder · Culture</th>
+      <th class="sort" data-k="combined">Quarter score</th><th>Year</th><th class="side">Year total</th>
+    </tr></thead><tbody id="rows"></tbody></table>
+    <div class="empty hidden" id="empty">No employees yet. Add them from the Employees button.</div></div>
+  </main>
+</div>
+
+<div class="overlay hidden" id="overlay"></div>
+<aside id="drawer">
+  <div class="dhead"><div><h2 id="dTitle"></h2><div class="meta" id="dMeta"></div></div><button class="x" id="dClose">×</button></div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+
+<div id="empModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:760px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Employees</h2><button class="x" id="empClose">×</button></div>
+    <div class="tablewrap" style="margin:12px 0"><table style="font-size:13px"><thead><tr><th>Name</th><th>Department</th><th>Designation</th><th>Linked login</th><th></th></tr></thead><tbody id="empRows"></tbody></table></div>
+    <h3 style="font-size:14px;margin:0 0 6px">Add an employee</h3>
+    <div class="grid2">
+      <div><label>Name</label><input id="eName"></div>
+      <div><label>Linked login (optional)</label><select id="eUser"><option value="">— none —</option></select></div>
+      <div><label>Department <button class="btn ghost small" data-add="department" style="padding:2px 8px;font-size:11px">+ add</button></label><select id="eDept"></select></div>
+      <div><label>Designation <button class="btn ghost small" data-add="designation" style="padding:2px 8px;font-size:11px">+ add</button></label><select id="eDesig"></select></div>
+    </div>
+    <div class="err" id="eErr"></div>
+    <button class="btn" id="eAdd">Add employee</button>
+  </div>
+</div>
+
+<div id="raterModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:560px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center"><h2 style="margin:0">Who rates</h2><button class="x" id="raterClose">×</button></div>
+    <p class="fml" style="margin:8px 0">Each person rates from one chair. Only they can change their own scores.</p>
+    <div class="tablewrap"><table class="grid-acc" style="font-size:13px"><thead><tr><th>Person</th><th>Chair</th></tr></thead><tbody id="raterRows"></tbody></table></div>
+  </div>
+</div>
+
+<div id="repModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="upbox" style="max-width:900px;max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0">Year summary</h2>
+      <select id="repYear" style="width:auto"></select>
+      <button class="btn ghost small" id="repXls">Export</button>
+      <button class="btn small" id="repPdf">PDF</button><button class="x" id="repClose">×</button></div>
+    <div class="fml" style="margin:8px 0">Each quarter out of 10 · year total out of 40</div>
+    <div class="tablewrap"><table id="repTable" style="font-size:13px"></table></div>
+  </div>
+</div>
+
+<script>
+const MOD = "kpi";
+let ctx, employees = [], ratings = [], incidents = [], raters = [], myRole = null, editingId = null;
+let filter = { q: "", dept: "", state: "", sort: "name", dir: 1 };
+let QTR = "";
+/* ---- shared helpers for module pages ---- */
+let lookups = [], customFields = [], usage = {};
+const opts = key => lookups.filter(l => l.list_key === key && l.active).sort((a,b) => a.sort - b.sort).map(l => l.value);
+const isAdm = () => ctx.isSuper || ctx.level === "admin";
+const canEdit = () => ctx.level === "edit" || ctx.level === "admin";
+async function loadShared(mod){
+  try { lookups = (await fetchAll("lookup_values","id, module, list_key, value, sort, active")).filter(l => l.module === mod); } catch (e){ lookups = []; }
+  try { customFields = (await fetchAll("module_fields","module, field_key, label, ftype, grp, sort, is_custom")).filter(f => f.module === mod && f.is_custom).sort((a,b) => a.sort - b.sort); } catch (e){ customFields = []; }
+}
+function customInputs(rec){
+  if (!customFields.length) return "";
+  return `<h3 style="margin-top:16px">More details</h3><div class="grid2">` + customFields.map(f => {
+    const v = (rec && rec.extra && rec.extra[f.field_key]) ?? "";
+    let input;
+    if (f.ftype.startsWith("list:")) input = `<select id="x_${f.field_key}"><option value=""></option>` + opts(f.ftype.slice(5)).map(o => `<option ${String(v) === o ? "selected" : ""}>${esc(o)}</option>`).join("") + `</select>`;
+    else if (f.ftype === "yesno") input = `<select id="x_${f.field_key}"><option value=""></option><option ${v === "Yes" ? "selected" : ""}>Yes</option><option ${v === "No" ? "selected" : ""}>No</option></select>`;
+    else input = `<input id="x_${f.field_key}" type="${f.ftype === "date" ? "date" : f.ftype === "number" ? "number" : "text"}" value="${esc(v)}">`;
+    return `<div><label>${esc(f.label)}</label>${input}</div>`;
+  }).join("") + `</div>`;
+}
+function customValues(){
+  const o = {};
+  customFields.forEach(f => { const el = $("x_" + f.field_key); if (el && el.value !== "") o[f.field_key] = el.value; });
+  return o;
+}
+/* custom field manager */
+function fieldMgr(mod){
+  $("cfList").innerHTML = customFields.map(f => `<li><span>${esc(f.label)} <span style="color:var(--muted);font-size:12px">· ${esc(f.ftype)}</span></span>
+    <a href="#" data-cfdel="${f.field_key}" style="color:var(--warn)">Remove</a></li>`).join("") || `<li style="color:var(--muted)">No extra fields yet.</li>`;
+  document.querySelectorAll("[data-cfdel]").forEach(a => a.onclick = async e => { e.preventDefault();
+    if (!confirm("Remove this field? Values already entered stay in the record but stop being shown.")) return;
+    const r = await sb.from("module_fields").delete().eq("module", mod).eq("field_key", a.dataset.cfdel);
+    if (r.error){ alert(r.error.message); return; }
+    customFields = customFields.filter(f => f.field_key !== a.dataset.cfdel); fieldMgr(mod); toast("Removed"); });
+}
+async function addCustomField(mod){
+  const label = $("cfLabel").value.trim(); if (!label){ toast("Give the field a name"); return; }
+  const key = "x_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const r = await sb.from("module_fields").insert({ module: mod, field_key: key, label, ftype: $("cfType").value, grp: "More details", sort: 900 + customFields.length, is_custom: true }).select().single();
+  if (r.error){ alert(r.error.message); return; }
+  customFields.push(r.data); $("cfLabel").value = ""; fieldMgr(mod); toast("Field added ✓");
+}
+
+/* ===== shared list manager (v6.4) ===== */
+async function lmLoadUsage(mod){
+  try { const { data, error } = await sb.rpc("lookup_usage", { m: mod }); if (error) throw error;
+    const u = {}; (data || []).forEach(r => u[r.list_key + "||" + r.value] = +r.uses); return u; } catch (e){ return {}; }
+}
+function lmNorm(s){ return (s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function lmRender(cfg){
+  const { mod, listSel, itemsEl, labels, lookups, usage, onChange } = cfg;
+  const k = listSel.value;
+  const items = lookups.filter(l => l.list_key === k).sort((a,b) => a.sort - b.sort);
+  const dupe = {}; items.forEach(i => { const n = lmNorm(i.value); (dupe[n] ||= []).push(i.value); });
+  itemsEl.innerHTML = items.map(i => {
+    const n = usage[k + "||" + i.value] || 0;
+    const isDupe = dupe[lmNorm(i.value)].length > 1;
+    const count = n ? `<span class="pill ${isDupe ? "hot" : "talk"}">${n} record${n === 1 ? "" : "s"}${isDupe ? " · looks duplicate" : ""}</span>`
+                    : `<span style="color:var(--muted);font-size:12px">not used${isDupe ? " · looks duplicate" : ""}</span>`;
+    return `<li style="align-items:center;gap:10px">
+      <span style="flex:1">${esc(i.value)}${i.active ? "" : ' <span class="pill cold">off</span>'}</span>
+      ${count}
+      ${isDupe ? `<button class="btn ghost small" data-merge="${esc(i.value)}">Merge</button>` : ""}
+      <button class="btn ghost small" data-toggle="${i.id}">${i.active ? "Turn off" : "Turn on"}</button>
+      <button class="btn ghost small" data-del="${esc(i.value)}" ${n ? `disabled title="Used by ${n} record${n === 1 ? "" : "s"} — merge it first" style="opacity:.45"` : 'style="color:var(--warn);border-color:var(--warn)"'}>Delete</button>
+    </li>`;
+  }).join("") || `<li style="color:var(--muted)">Empty list.</li>`;
+
+  itemsEl.querySelectorAll("[data-toggle]").forEach(b => b.onclick = async () => {
+    const it = lookups.find(l => String(l.id) === b.dataset.toggle);
+    const r = await sb.from("lookup_values").update({ active: !it.active }).eq("id", it.id);
+    if (r.error){ toast(r.error.message); return; }
+    it.active = !it.active; lmRender(cfg); onChange && onChange();
+  });
+  itemsEl.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const v = b.dataset.del;
+    if (!confirm(`Delete "${v}" from this list? It cannot be undone.`)) return;
+    const { error } = await sb.rpc("lookup_delete", { m: mod, lk: k, v });
+    if (error){ alert(error.message); return; }
+    const i = lookups.findIndex(l => l.list_key === k && l.value === v); if (i >= 0) lookups.splice(i, 1);
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange(); toast("Deleted ✓");
+  });
+  itemsEl.querySelectorAll("[data-merge]").forEach(b => b.onclick = async () => {
+    const from = b.dataset.merge;
+    const others = dupe[lmNorm(from)].filter(v => v !== from);
+    const to = prompt(`Move every record from "${from}" into which option?\n\n${others.join("\n")}`, others[0]);
+    if (!to) return;
+    const { data, error } = await sb.rpc("lookup_merge", { m: mod, lk: k, from_value: from, to_value: to });
+    if (error){ alert(error.message); return; }
+    cfg.usage = await lmLoadUsage(mod); lmRender(cfg); onChange && onChange();
+    toast(`${data || 0} record${data === 1 ? "" : "s"} moved to "${to}" — you can delete the old one now`, 4000);
+  });
+}
+
+
+/* Indian financial-year quarters */
+function fyQuarter(d){ const y = d.getFullYear(), m = d.getMonth();
+  const qi = m >= 3 ? Math.floor((m - 3) / 3) : 3;
+  const fy = m >= 3 ? y : y - 1;
+  return `Q${qi + 1} ${fy}-${String(fy + 1).slice(2)}`; }
+function quarterList(n = 8){ const out = []; const d = new Date();
+  for (let i = 0; i < n; i++){ out.push(fyQuarter(d)); d.setMonth(d.getMonth() - 3); } return out; }
+function fyOf(q){ return q.split(" ")[1]; }
+function quartersOfYear(fy){ return ["Q1","Q2","Q3","Q4"].map(q => `${q} ${fy}`); }
+
+(async () => {
+  ctx = await requireAuth(MOD); if (!ctx) return;
+  shellHeader("KPI & Culture", ctx);
+  await loadShared(MOD); await load();
+  QTR = quarterList()[0];
+  $("qtr").innerHTML = quarterList().map(q => `<option>${q}</option>`).join("");
+  $("app").classList.remove("hidden");
+  if (isAdm()) ["empBtn","raterBtn","repBtn","xlsBtn"].forEach(i => $(i).classList.remove("hidden"));
+  $("chair").innerHTML = myRole
+    ? `You are rating as <b>${myRole === "hr" ? "HR" : "Founder"}</b>. Only your own scores can be changed by you.`
+    : `You can see the scores but not change them — an admin decides who rates from each chair.`;
+  render();
+})();
+
+async function load(){
+  employees = await fetchAll("kpi_employees", "*", { col: "name" });
+  ratings = await fetchAll("kpi_ratings", "*");
+  incidents = await fetchAll("kpi_incidents", "*", { col: "incident_date", asc: false });
+  try { raters = await fetchAll("kpi_raters", "*"); } catch (e){ raters = []; }
+  myRole = (raters.find(r => r.user_id === ctx.me.id) || {}).rater_role || (ctx.isSuper ? "founder" : null);
+  $("fDept").innerHTML = `<option value="">All departments</option>` + opts("department").map(o => `<option>${esc(o)}</option>`).join("");
+}
+
+const rate = (empId, q, role) => ratings.find(r => r.employee_id === empId && r.quarter === q && r.rater_role === role);
+function combined(empId, q){
+  const rs = ratings.filter(r => r.employee_id === empId && r.quarter === q && (r.kpi_score != null || r.culture_score != null));
+  if (!rs.length) return null;
+  const k = rs.filter(r => r.kpi_score != null), c = rs.filter(r => r.culture_score != null);
+  const ak = k.length ? k.reduce((s,r) => s + +r.kpi_score, 0) / k.length : 0;
+  const ac = c.length ? c.reduce((s,r) => s + +r.culture_score, 0) / c.length : 0;
+  return Math.round(((ak + ac) / 2) * 100) / 100;
+}
+function yearTotal(empId, fy){ return quartersOfYear(fy).reduce((s,q) => s + (combined(empId, q) || 0), 0); }
+function scorePill(v){
+  if (v == null) return `<span class="score s-none">—</span>`;
+  const c = v >= 7.5 ? "s-hi" : v >= 5 ? "s-mid" : "s-low";
+  return `<span class="score ${c}">${(+v).toFixed(1)}</span>`;
+}
+function yearBar(empId, fy){
+  return `<span class="ybar">` + quartersOfYear(fy).map(q => { const v = combined(empId, q);
+    const h = v == null ? 3 : Math.max(3, Math.round(v / 10 * 24));
+    const col = v == null ? "var(--line)" : v >= 7.5 ? "#1d5c3a" : v >= 5 ? "#d99a1e" : "#c8322b";
+    return `<span title="${q}: ${v == null ? "not rated" : v}" style="height:${h}px;background:${col}"></span>`; }).join("") + `</span>`;
+}
+
+function render(){
+  const fy = fyOf(QTR);
+  const act = employees.filter(e => e.active);
+  const tile = (l, v, cls = "") => `<div class="stat ${cls}"><b>${v}</b><span>${l}</span></div>`;
+  const rated = act.filter(e => combined(e.id, QTR) != null);
+  const mine = myRole ? act.filter(e => { const r = rate(e.id, QTR, myRole); return !r || (r.kpi_score == null && r.culture_score == null); }) : [];
+  const avg = rated.length ? rated.reduce((s,e) => s + combined(e.id, QTR), 0) / rated.length : 0;
+  $("stats").innerHTML = tile("Employees", act.length) +
+    tile("Rated", rated.length, "grn") + tile("Not rated", act.length - rated.length, act.length - rated.length ? "red" : "") +
+    (myRole ? tile("Waiting on you", mine.length, mine.length ? "amb" : "") : "") +
+    tile("Average score", avg ? avg.toFixed(1) : "—", "pct");
+  const yr = act.map(e => yearTotal(e.id, fy));
+  $("ystats").innerHTML = tile("Financial year", fy) +
+    tile("Average of year", yr.length ? (yr.reduce((a,b) => a+b, 0) / yr.length).toFixed(1) + " / 40" : "—", "pct") +
+    tile("Above 30", yr.filter(v => v >= 30).length, "grn") + tile("Below 20", yr.filter(v => v > 0 && v < 20).length, "red");
+
+  let list = employees.filter(e => e.active);
+  if (filter.dept) list = list.filter(e => e.department === filter.dept);
+  if (filter.state === "pending" && myRole) list = list.filter(e => { const r = rate(e.id, QTR, myRole); return !r || (r.kpi_score == null && r.culture_score == null); });
+  if (filter.state === "done") list = list.filter(e => rate(e.id, QTR, "hr") && rate(e.id, QTR, "founder"));
+  const q = filter.q.toLowerCase();
+  if (q) list = list.filter(e => [e.name, e.department, e.designation].some(v => (v || "").toLowerCase().includes(q)));
+  list.sort((a,b) => { let x, y;
+    if (filter.sort === "combined"){ x = combined(a.id, QTR) ?? -1; y = combined(b.id, QTR) ?? -1; }
+    else { x = (a.name || "").toLowerCase(); y = (b.name || "").toLowerCase(); }
+    return x < y ? -filter.dir : x > y ? filter.dir : 0; });
+
+  $("rows").innerHTML = list.map(e => {
+    const h = rate(e.id, QTR, "hr") || {}, f = rate(e.id, QTR, "founder") || {}, c = combined(e.id, QTR), yt = yearTotal(e.id, fy);
+    return `<tr class="row" data-id="${e.id}">
+      <td><div>${esc(e.name)}</div><div style="font-size:11px;color:var(--muted)">${esc(e.designation || "")}</div></td>
+      <td>${esc(e.department || "")}</td>
+      <td>${scorePill(h.kpi_score)}</td><td>${scorePill(h.culture_score)}</td>
+      <td>${scorePill(f.kpi_score)}</td><td>${scorePill(f.culture_score)}</td>
+      <td>${scorePill(c)}</td><td>${yearBar(e.id, fy)}</td>
+      <td class="side"><b>${yt ? yt.toFixed(1) : "—"}</b><span style="color:var(--muted)"> / 40</span></td></tr>`; }).join("");
+  $("empty").classList.toggle("hidden", list.length > 0);
+  document.querySelectorAll("#rows tr.row").forEach(el => el.onclick = () => openEmp(el.dataset.id));
+  document.querySelectorAll("th.sort").forEach(th => th.onclick = () => { if (filter.sort === th.dataset.k) filter.dir = -filter.dir; else { filter.sort = th.dataset.k; filter.dir = 1; } render(); });
+}
+$("q").oninput = e => { filter.q = e.target.value; render(); };
+$("qtr").onchange = e => { QTR = e.target.value; render(); };
+$("fDept").onchange = e => { filter.dept = e.target.value; render(); };
+$("fState").onchange = e => { filter.state = e.target.value; render(); };
+$("clearF").onclick = () => { filter = { ...filter, q: "", dept: "", state: "" }; ["q","fDept","fState"].forEach(i => $(i).value = ""); render(); };
+
+/* ---------- employee drawer ---------- */
+function raterBlock(role, emp){
+  const r = rate(emp.id, QTR, role) || {}, mine = myRole === role;
+  const who = (ctx.profiles.find(p => p.id === r.rater_user) || {}).full_name || "";
+  return `<div class="rater ${mine ? "me" : ""}">
+    <h4>${role === "hr" ? "HR" : "Founder"}${who ? ` · ${esc(who)}` : ""}${mine ? " · your chair" : ""}</h4>
+    ${mine ? `
+      <label>KPI rating</label>
+      <div class="slide"><input type="range" id="${role}_k" min="0" max="10" step="0.5" value="${r.kpi_score ?? 5}"><b id="${role}_kv">${r.kpi_score ?? 5}</b></div>
+      <label>Why this KPI rating</label><textarea id="${role}_kn" rows="2">${esc(r.kpi_note || "")}</textarea>
+      <label style="margin-top:10px">Culture rating</label>
+      <div class="slide"><input type="range" id="${role}_c" min="0" max="10" step="0.5" value="${r.culture_score ?? 5}"><b id="${role}_cv">${r.culture_score ?? 5}</b></div>
+      <label>Why this culture rating</label><textarea id="${role}_cn" rows="2">${esc(r.culture_note || "")}</textarea>
+      <button class="btn" id="${role}_save" style="margin-top:10px">Save my rating</button>`
+    : `<div class="kv"><div>KPI</div><div>${scorePill(r.kpi_score)}</div><div>Culture</div><div>${scorePill(r.culture_score)}</div></div>
+       ${r.kpi_note ? `<div class="n" style="margin-top:8px;font-size:13px"><b>KPI:</b> ${esc(r.kpi_note)}</div>` : ""}
+       ${r.culture_note ? `<div class="n" style="margin-top:4px;font-size:13px"><b>Culture:</b> ${esc(r.culture_note)}</div>` : ""}
+       ${!r.kpi_score && !r.culture_score ? `<div style="color:var(--muted);font-size:13px">Not rated yet.</div>` : ""}`}
+  </div>`;
+}
+function openEmp(id){
+  const e = employees.find(x => x.id === id); if (!e) return; editingId = id;
+  const fy = fyOf(QTR), c = combined(id, QTR), yt = yearTotal(id, fy);
+  const inc = incidents.filter(i => i.employee_id === id);
+  $("dTitle").textContent = e.name;
+  $("dMeta").textContent = [e.designation, e.department].filter(Boolean).join(" · ");
+  $("dbody").innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <div class="stat"><b>${c == null ? "—" : c.toFixed(1)}</b><span>${QTR}</span></div>
+      <div class="stat"><b>${yt ? yt.toFixed(1) : "—"} / 40</b><span>${fy}</span></div>
+      <div class="stat"><b>${yearBar(id, fy)}</b><span>Q1 · Q2 · Q3 · Q4</span></div>
+    </div>
+    <h3 style="margin-top:14px">${QTR} ratings</h3>
+    ${raterBlock("hr", e)}
+    ${raterBlock("founder", e)}
+    <h3 style="margin-top:22px">Things worth remembering
+      ${canEdit() ? `<button class="btn ghost small" id="incAdd" style="margin-left:8px">+ Add</button>` : ""}</h3>
+    <ul class="hist" id="incList">${inc.length ? inc.map(i => {
+      const who = (ctx.profiles.find(p => p.id === i.by_user) || {}).full_name || "";
+      const col = i.kind === "appreciation" ? "done" : i.kind === "concern" ? "red" : "talk";
+      return `<li><div class="d"><span class="pill ${col}">${esc(i.kind)}</span> ${fmtY(i.incident_date)}${i.quarter ? " · " + esc(i.quarter) : ""} · ${esc(who)}
+        ${i.by_user === ctx.me.id && canEdit() ? `<button class="e" data-incdel="${i.id}" style="color:var(--warn)">Remove</button>` : ""}</div>
+        ${i.title ? `<div class="n"><b>${esc(i.title)}</b></div>` : ""}${i.note ? `<div class="n">${esc(i.note)}</div>` : ""}</li>`;
+    }).join("") : `<li style="color:var(--muted)">Nothing noted yet.</li>`}</ul>
+    <h3 style="margin-top:22px">Year by year</h3>
+    <div class="tablewrap"><table style="font-size:13px"><thead><tr><th>Quarter</th><th>HR</th><th>Founder</th><th>Score</th></tr></thead><tbody>
+      ${quarterList(8).map(q => { const h = rate(id, q, "hr") || {}, f = rate(id, q, "founder") || {}, cc = combined(id, q);
+        return `<tr><td>${q}</td>
+          <td>${h.kpi_score != null || h.culture_score != null ? `${scorePill(h.kpi_score)} ${scorePill(h.culture_score)}` : "—"}</td>
+          <td>${f.kpi_score != null || f.culture_score != null ? `${scorePill(f.kpi_score)} ${scorePill(f.culture_score)}` : "—"}</td>
+          <td>${scorePill(cc)}</td></tr>`; }).join("")}
+    </tbody></table></div>`;
+
+  ["hr","founder"].forEach(role => {
+    if (myRole !== role) return;
+    const sync = k => { $(`${role}_${k}v`).textContent = $(`${role}_${k}`).value; };
+    $(`${role}_k`).oninput = () => sync("k"); $(`${role}_c`).oninput = () => sync("c");
+    $(`${role}_save`).onclick = async () => {
+      const rec = { employee_id: id, quarter: QTR, rater_role: role, rater_user: ctx.me.id,
+        kpi_score: +$(`${role}_k`).value, culture_score: +$(`${role}_c`).value,
+        kpi_note: $(`${role}_kn`).value.trim() || null, culture_note: $(`${role}_cn`).value.trim() || null,
+        updated_at: new Date().toISOString() };
+      const r = await sb.from("kpi_ratings").upsert(rec, { onConflict: "employee_id,quarter,rater_role" });
+      if (r.error){ alert(r.error.message); return; }
+      await load(); render(); openEmp(id); toast("Rating saved ✓");
+    };
+  });
+  if ($("incAdd")) $("incAdd").onclick = async () => {
+    const kind = prompt("appreciation, concern or note?", "note"); if (!kind) return;
+    if (!["appreciation","concern","note"].includes(kind)){ toast("Type one of the three words"); return; }
+    const title = prompt("In one line:"); if (!title) return;
+    const note = prompt("Any detail? (optional)") || null;
+    const r = await sb.from("kpi_incidents").insert({ employee_id: id, quarter: QTR, kind, title, note,
+      by_user: ctx.me.id, by_role: myRole, incident_date: today() });
+    if (r.error){ alert(r.error.message); return; }
+    await load(); openEmp(id); toast("Noted ✓");
+  };
+  document.querySelectorAll("[data-incdel]").forEach(b => b.onclick = async () => {
+    if (!confirm("Remove this note?")) return;
+    const r = await sb.from("kpi_incidents").delete().eq("id", b.dataset.incdel);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); openEmp(id); toast("Removed");
+  });
+  show();
+}
+function show(){ $("drawer").classList.add("open"); $("overlay").classList.remove("hidden"); $("drawer").scrollTop = 0; }
+function closeDrawer(){ $("drawer").classList.remove("open"); $("overlay").classList.add("hidden"); editingId = null; }
+$("dClose").onclick = closeDrawer; $("overlay").onclick = closeDrawer;
+
+/* ---------- employees ---------- */
+$("empBtn").onclick = () => {
+  $("eUser").innerHTML = `<option value="">— none —</option>` + ctx.profiles.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
+  $("eDept").innerHTML = `<option value=""></option>` + opts("department").map(o => `<option>${esc(o)}</option>`).join("");
+  $("eDesig").innerHTML = `<option value=""></option>` + opts("designation").map(o => `<option>${esc(o)}</option>`).join("");
+  drawEmp(); wireAdds(); $("empModal").classList.remove("hidden");
+};
+$("empClose").onclick = () => $("empModal").classList.add("hidden");
+function drawEmp(){
+  const pmap = Object.fromEntries(ctx.profiles.map(p => [p.id, p.full_name]));
+  $("empRows").innerHTML = employees.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.department || "")}</td><td>${esc(e.designation || "")}</td>
+    <td>${esc(pmap[e.user_id] || "—")}</td>
+    <td style="white-space:nowrap"><button class="btn ghost small" data-etog="${e.id}">${e.active ? "Set inactive" : "Set active"}</button>
+    ${ratings.some(r => r.employee_id === e.id) ? "" : `<button class="btn ghost small" data-edel="${e.id}" style="color:var(--warn);border-color:var(--warn)">Delete</button>`}</td></tr>`).join("")
+    || `<tr><td colspan="5" style="color:var(--muted)">No employees yet.</td></tr>`;
+  document.querySelectorAll("[data-etog]").forEach(b => b.onclick = async () => {
+    const e = employees.find(x => x.id === b.dataset.etog);
+    const r = await sb.from("kpi_employees").update({ active: !e.active }).eq("id", e.id);
+    if (r.error){ alert(r.error.message); return; } await load(); drawEmp(); render();
+  });
+  document.querySelectorAll("[data-edel]").forEach(b => b.onclick = async () => {
+    if (!confirm("Delete this employee?")) return;
+    const r = await sb.from("kpi_employees").delete().eq("id", b.dataset.edel);
+    if (r.error){ alert(r.error.message); return; } await load(); drawEmp(); render(); toast("Deleted");
+  });
+}
+$("eAdd").onclick = async () => {
+  const name = $("eName").value.trim(); if (!name){ $("eErr").textContent = "Name is needed."; return; }
+  const r = await sb.from("kpi_employees").insert({ name, user_id: $("eUser").value || null,
+    department: $("eDept").value || null, designation: $("eDesig").value || null, created_by: ctx.me.id });
+  if (r.error){ $("eErr").textContent = r.error.message; return; }
+  $("eName").value = ""; $("eErr").textContent = ""; await load(); drawEmp(); render(); toast("Added ✓");
+};
+
+/* ---------- who rates ---------- */
+$("raterBtn").onclick = () => { drawRaters(); $("raterModal").classList.remove("hidden"); };
+$("raterClose").onclick = () => $("raterModal").classList.add("hidden");
+function drawRaters(){
+  $("raterRows").innerHTML = ctx.profiles.slice().sort((a,b) => a.full_name.localeCompare(b.full_name)).map(p => {
+    const cur = (raters.find(r => r.user_id === p.id) || {}).rater_role || "";
+    return `<tr><td>${esc(p.full_name)}</td><td><select data-rate="${p.id}">
+      <option value="">— does not rate —</option>
+      <option value="hr" ${cur === "hr" ? "selected" : ""}>HR</option>
+      <option value="founder" ${cur === "founder" ? "selected" : ""}>Founder</option></select></td></tr>`; }).join("");
+  document.querySelectorAll("[data-rate]").forEach(s => s.onchange = async () => {
+    const uid = s.dataset.rate, role = s.value;
+    const r = role ? await sb.from("kpi_raters").upsert({ user_id: uid, rater_role: role }, { onConflict: "user_id" })
+                   : await sb.from("kpi_raters").delete().eq("user_id", uid);
+    if (r.error){ alert(r.error.message); return; }
+    await load(); drawRaters(); toast("Saved ✓");
+  });
+}
+
+/* ---------- year report ---------- */
+let repRows = [];
+$("repBtn").onclick = () => {
+  const years = [...new Set(quarterList(12).map(fyOf))];
+  $("repYear").innerHTML = years.map(y => `<option>${y}</option>`).join("");
+  runRep(); $("repModal").classList.remove("hidden");
+};
+$("repClose").onclick = () => $("repModal").classList.add("hidden");
+$("repYear").onchange = runRep;
+function runRep(){
+  const fy = $("repYear").value;
+  repRows = employees.filter(e => e.active).map(e => {
+    const row = { Employee: e.name, Department: e.department || "" };
+    quartersOfYear(fy).forEach(q => { const v = combined(e.id, q); row[q.split(" ")[0]] = v == null ? "" : +v.toFixed(1); });
+    row["Total / 40"] = +yearTotal(e.id, fy).toFixed(1);
+    return row;
+  }).sort((a,b) => b["Total / 40"] - a["Total / 40"]);
+  const cols = Object.keys(repRows[0] || { Employee: "" });
+  $("repTable").innerHTML = `<thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>` +
+    repRows.map((r, i) => `<tr><td>${i + 1}. ${esc(r.Employee)}</td>` + cols.slice(1).map(c => `<td>${c === "Total / 40" ? `<b>${r[c]}</b>` : esc(String(r[c] ?? ""))}</td>`).join("") + `</tr>`).join("") + "</tbody>";
+}
+$("repXls").onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(repRows), "Year"); XLSX.writeFile(wb, `GHC_kpi_${$("repYear").value}.xlsx`); };
+$("repPdf").onclick = () => {
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const G = [29, 92, 58], W = doc.internal.pageSize.getWidth();
+  doc.setFillColor(...G); doc.rect(0, 0, W, 22, "F");
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text("Green Hedge Capital", 14, 10);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text(`KPI & Culture — ${$("repYear").value}`, 14, 17);
+  const cols = Object.keys(repRows[0] || {});
+  doc.autoTable({ startY: 30, head: [cols], body: repRows.map(r => cols.map(c => r[c] ?? "")),
+    theme: "grid", styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: G, textColor: 255 }, margin: { left: 14, right: 14 } });
+  doc.setFontSize(8); doc.setTextColor(130);
+  doc.text("Quarter score = (average KPI + average Culture) ÷ 2 · Confidential", 14, doc.internal.pageSize.getHeight() - 8);
+  doc.save(`GHC_KPI_${$("repYear").value}.pdf`);
+};
+$("xlsBtn").onclick = () => {
+  const pmap = Object.fromEntries(ctx.profiles.map(p => [p.id, p.full_name]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ratings.map(r => { const e = employees.find(x => x.id === r.employee_id) || {};
+    return { Employee: e.name || "", Quarter: r.quarter, Chair: r.rater_role, By: pmap[r.rater_user] || "", KPI: r.kpi_score, Culture: r.culture_score, "KPI note": r.kpi_note || "", "Culture note": r.culture_note || "" }; })), "Ratings");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(incidents.map(i => { const e = employees.find(x => x.id === i.employee_id) || {};
+    return { Employee: e.name || "", Date: i.incident_date, Quarter: i.quarter || "", Kind: i.kind, Title: i.title || "", Note: i.note || "", By: pmap[i.by_user] || "" }; })), "Notes");
+  XLSX.writeFile(wb, `GHC_kpi_${today()}.xlsx`);
+};
+
+function wireAdds(){
+  document.querySelectorAll("[data-add]").forEach(b => b.onclick = async e => { e.preventDefault();
+    if (!isAdm()){ toast("Only an admin can add to this list"); return; }
+    const key = b.dataset.add, v = prompt("Add an option:"); if (!v) return;
+    const r = await sb.from("lookup_values").insert({ module: MOD, list_key: key, value: v.trim(), sort: lookups.filter(l => l.list_key === key).length }).select().single();
+    if (r.error){ alert(r.error.message); return; }
+    lookups.push(r.data);
+    const sel = b.closest("div").querySelector("select");
+    const o = document.createElement("option"); o.textContent = v.trim(); sel.appendChild(o); sel.value = v.trim(); toast("Added ✓"); });
+}
+</script>
+</body>
+</html>
